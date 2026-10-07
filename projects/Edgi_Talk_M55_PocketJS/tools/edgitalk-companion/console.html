@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edgi Talk</title>
+  <style>
+    :root {
+      --paper: #e7e1d6;
+      --card: #f7f3ec;
+      --ink: #1c1915;
+      --muted: #6b645a;
+      --line: #d4cbbd;
+      --teal: #1d7974;
+      --teal-ink: #f4fffd;
+      --warn: #8c3a32;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--ink);
+      font: 17px/1.45 Palatino, "Palatino Linotype", "Songti SC", "Noto Serif CJK SC", serif;
+    }
+    main { max-width: 860px; margin: 0 auto; padding: 48px 28px 72px; }
+    .eyebrow {
+      margin: 0;
+      font-family: "Source Code Pro", ui-monospace, monospace;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+    }
+    h1 { margin: 10px 0 0; font-weight: 600; font-size: 40px; letter-spacing: -0.03em; }
+    #link { margin: 12px 0 0; color: var(--muted); min-height: 1.45em; }
+    section {
+      margin-top: 28px;
+      padding: 22px 24px 20px;
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+    h2 { margin: 0 0 16px; font-size: 22px; font-weight: 600; }
+    label { display: block; margin-bottom: 6px; }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      max-width: 280px;
+      padding: 10px 12px;
+      border: 1px solid var(--ink);
+      background: transparent;
+      color: var(--ink);
+      font: 22px/1 "Source Code Pro", ui-monospace, monospace;
+    }
+    input:focus { outline: 2px solid var(--teal); outline-offset: 2px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+    button {
+      border: 1px solid var(--ink);
+      background: transparent;
+      color: var(--ink);
+      font: 16px/1 Palatino, "Palatino Linotype", "Songti SC", serif;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); }
+    button[aria-pressed="true"] { background: var(--ink); color: var(--card); }
+    button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .note { margin: 12px 0 0; min-height: 1.45em; color: var(--muted); }
+    .note.warn { color: var(--warn); }
+    .figures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .figures div { border-top: 1px solid var(--line); padding-top: 10px; }
+    .figures b {
+      display: block;
+      margin-top: 4px;
+      font-family: "Source Code Pro", ui-monospace, monospace;
+      font-size: 34px;
+      font-weight: 500;
+      letter-spacing: -0.04em;
+    }
+    .figures span { color: var(--muted); font-size: 14px; }
+    .file {
+      display: inline-block;
+      padding: 10px 16px;
+      border: 1px dashed var(--ink);
+      cursor: pointer;
+    }
+    .file input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    @media (max-width: 700px) {
+      h1 { font-size: 32px; }
+      .figures { grid-template-columns: 1fr 1fr; }
+      main { padding: 32px 18px 56px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">EDGI TALK</p>
+    <h1>把这台电脑接到板子上</h1>
+    <p id="link">正在这个网络里找板子…</p>
+
+    <section>
+      <h2>配对码</h2>
+      <label for="code">设置页右侧的六位数字</label>
+      <input id="code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="123456">
+      <p class="hint">地址不用填。先找蓝牙名字 EdgiTalk，找不到再找 Wi-Fi。</p>
+      <div class="row">
+        <button class="primary" id="connect" type="button">连接</button>
+        <button id="again" type="button">重新寻找</button>
+      </div>
+      <p class="note" id="findNote"></p>
+    </section>
+
+    <section>
+      <h2>这台电脑</h2>
+      <div class="figures">
+        <div><span>CPU</span><b id="cpu">--</b></div>
+        <div><span>内存</span><b id="ram">--</b><span id="ramDetail"></span></div>
+        <div><span>磁盘</span><b id="disk">--</b><span id="diskDetail"></span></div>
+        <div><span>温度</span><b id="temp">--</b></div>
+      </div>
+      <div class="row">
+        <button class="primary" id="send" type="button">发给板子</button>
+        <button type="button" data-interval="1" aria-pressed="false">1 秒</button>
+        <button type="button" data-interval="2" aria-pressed="true">2 秒</button>
+        <button type="button" data-interval="5" aria-pressed="false">5 秒</button>
+        <button id="sync" type="button">只校准时间</button>
+      </div>
+      <p class="note" id="sendNote"></p>
+    </section>
+
+    <section>
+      <h2>一首曲子</h2>
+      <div class="row">
+        <label class="file">选择 MIDI 或 JSON<input id="file" type="file" accept=".mid,.midi,.json,audio/midi,application/json"></label>
+        <span id="filename">还没有选择文件</span>
+      </div>
+      <div class="row">
+        <label for="title">标题，最多 12 个英文字</label>
+      </div>
+      <input id="title" type="text" maxlength="12" placeholder="My Song">
+      <div class="row" id="levels">
+        <button type="button" data-level="1" aria-pressed="false">难度 1</button>
+        <button type="button" data-level="2" aria-pressed="true">难度 2</button>
+        <button type="button" data-level="3" aria-pressed="false">难度 3</button>
+      </div>
+      <p class="hint" id="chartNote">选一个 MIDI 或谱面 JSON。</p>
+      <div class="row">
+        <button class="primary" id="push" type="button">推到板子</button>
+        <button id="pull" type="button">从板子取回</button>
+        <button id="clear" type="button">删掉板上的曲子</button>
+        <button id="scores" type="button">看最高分</button>
+      </div>
+      <p class="note" id="songNote"></p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let level = 2;
+    let clearArmed = false;
+    let codeFilled = false;
+
+    function note(id, text, warn) {
+      const el = $(id);
+      el.textContent = text || "";
+      el.className = warn ? "note warn" : "note";
+    }
+
+    async function post(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "没有成功");
+      return data;
+    }
+
+    function apply(state) {
+      $("link").textContent = state.link || "";
+      if (!codeFilled && state.token) {
+        $("code").value = state.token;
+        codeFilled = true;
+      }
+      note("findNote", state.findNote, Boolean(state.findNote));
+      const stats = state.stats;
+      if (stats) {
+        $("cpu").textContent = stats.cpu + "%";
+        $("ram").textContent = stats.ramPct + "%";
+        $("ramDetail").textContent = (stats.ramUsedMb / 1024).toFixed(1) + " / " + (stats.ramTotalMb / 1024).toFixed(1) + " GB";
+        $("disk").textContent = stats.diskPct + "%";
+        $("diskDetail").textContent = stats.diskUsedGb + " / " + stats.diskTotalGb + " GB";
+        $("temp").textContent = stats.temp < 0 ? "N/A" : stats.temp + "°";
+      }
+      $("send").textContent = state.sending ? "停止" : "发给板子";
+      document.querySelectorAll("[data-interval]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(Number(button.dataset.interval) === state.interval));
+      });
+      if (state.chartNote) $("chartNote").textContent = state.chartNote;
+      note("sendNote", state.sendNote, state.sendNote && state.sendNote.indexOf("已") !== 0 && state.sendNote.indexOf("正在") !== 0);
+      if (state.songNote) note("songNote", state.songNote, false);
+    }
+
+    async function call(path, body, noteId) {
+      try {
+        apply(await post(path, body));
+      } catch (error) {
+        note(noteId, error.message, true);
+      }
+    }
+
+    $("connect").onclick = () => call("/api/local/connect", { token: $("code").value.trim() }, "findNote");
+    $("again").onclick = () => call("/api/local/discover", {}, "findNote");
+    $("send").onclick = () => call("/api/local/send", { on: $("send").textContent !== "停止" }, "sendNote");
+    $("sync").onclick = () => call("/api/local/sync", {}, "sendNote");
+    document.querySelectorAll("[data-interval]").forEach((button) => {
+      button.onclick = () => call("/api/local/interval", { interval: Number(button.dataset.interval) }, "sendNote");
+    });
+    document.querySelectorAll("[data-level]").forEach((button) => {
+      button.onclick = () => {
+        level = Number(button.dataset.level);
+        document.querySelectorAll("[data-level]").forEach((other) => {
+          other.setAttribute("aria-pressed", String(other === button));
+        });
+        if ($("file").files[0]) upload($("file").files[0]);
+      };
+    });
+    $("file").onchange = () => {
+      const file = $("file").files[0];
+      if (!file) return;
+      $("filename").textContent = file.name;
+      if (!$("title").value) $("title").value = file.name.replace(/\.[^.]+$/, "").slice(0, 12);
+      upload(file);
+    };
+    $("title").onchange = () => { if ($("file").files[0]) upload($("file").files[0]); };
+
+    async function upload(file) {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("title", $("title").value.trim());
+      body.append("level", String(level));
+      try {
+        const response = await fetch("/api/local/chart", { method: "POST", body });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || "这份曲子读不了");
+        apply(data);
+      } catch (error) {
+        note("songNote", error.message, true);
+      }
+    }
+
+    $("push").onclick = () => call("/api/local/push", {}, "songNote");
+    $("scores").onclick = () => call("/api/local/scores", {}, "songNote");
+    $("pull").onclick = async () => {
+      try {
+        const response = await fetch("/api/local/pull");
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "取不回来");
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "board-song.json";
+        link.click();
+        URL.revokeObjectURL(url);
+        note("songNote", "已开始下载板上的曲子。", false);
+      } catch (error) {
+        note("songNote", error.message, true);
+      }
+    };
+    $("clear").onclick = () => {
+      if (!clearArmed) {
+        clearArmed = true;
+        note("songNote", "再点一次，确认删掉板上的曲子。", true);
+        return;
+      }
+      clearArmed = false;
+      call("/api/local/clear", {}, "songNote");
+    };
+
+    async function poll() {
+      try { apply(await (await fetch("/api/local/state")).json()); } catch (error) { /* page stays usable */ }
+    }
+    poll();
+    setInterval(poll, 1000);
+  </script>
+</body>
+</html>
