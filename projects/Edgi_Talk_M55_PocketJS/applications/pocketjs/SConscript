@@ -1,0 +1,89 @@
+import os
+from building import *
+
+cwd = GetCurrentDir()
+repo_root = os.path.abspath(cwd + '/../../../../../pocketjs')
+quickjs_root = os.path.abspath(cwd + '/../../../../../quickjs-ng')
+
+idf_root = repo_root + '/hosts/esp-idf/components'
+rust_lib_dir = repo_root + '/hosts/esp-idf/native/ui-core/target/thumbv8m.main-none-eabihf/release'
+renderer_rust_lib_dir = repo_root + '/hosts/esp-idf/native/render-rgb565/target/thumbv8m.main-none-eabihf/release'
+smoke_package = repo_root + '/apps/edgitalk-m55-smoke/dist/edgitalk-m55-smoke.pocket'
+# CYW55513 module on this kit: bsp.mk component wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN.
+bt_fw = os.path.abspath(cwd + '/../../../../libraries/components/bt-fw-ifx-cyw55500a1/COMPONENT_wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN/btfw.c')
+
+host_src = [
+    cwd + '/pocketjs_app.c',
+    cwd + '/pocketjs_dashboard.c',
+    cwd + '/pocketjs_music.c',
+    cwd + '/pocketjs_synth.c',
+    cwd + '/pocketjs_game.c',
+    cwd + '/pocketjs_wifi.c',
+    cwd + '/pocketjs_bt.c',
+    bt_fw,
+    cwd + '/pocketjs_rt_compat.c',
+    cwd + '/quickjs_compat.c',
+    cwd + '/generated/pocketjs_package_edgitalk_smoke.c',
+    cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.S',
+    idf_root + '/pocketjs_guest/src/guest.c',
+    idf_root + '/pocketjs_package/src/package.c',
+    idf_root + '/pocketjs_ui_qjs/src/ui_qjs.c',
+    idf_root + '/pocketjs_ui_core/src/ui_core.c',
+    idf_root + '/pocketjs_render_rgb565/src/render_rgb565.c',
+]
+
+quickjs_src = [
+    quickjs_root + '/quickjs.c',
+    quickjs_root + '/libregexp.c',
+    quickjs_root + '/libunicode.c',
+    quickjs_root + '/dtoa.c',
+]
+
+path = [
+    cwd + '/include',
+    cwd + '/generated',
+    quickjs_root,
+    idf_root + '/pocketjs_guest/include',
+    idf_root + '/pocketjs_package/include',
+    idf_root + '/pocketjs_ui_qjs/include',
+    idf_root + '/pocketjs_ui_core/include',
+    idf_root + '/pocketjs_render_rgb565/include',
+]
+
+# Optional bench build: POCKETJS_DEBUG_TOUCH=1 scons ... adds an SWD touch-injection hook.
+debug_flags = ' -DPOCKETJS_DEBUG_TOUCH' if os.environ.get('POCKETJS_DEBUG_TOUCH') else ''
+
+host_group = DefineGroup(
+    'PocketJS',
+    host_src,
+    depend=[''],
+    LOCAL_CPPPATH=path,
+    LOCAL_CFLAGS=' -std=gnu11 -Wno-unused-function -Wno-unused-variable -Wno-format -include ' +
+                 cwd + '/include/pocketjs_qjs_ng_compat.h' + debug_flags,
+    LIBPATH=[renderer_rust_lib_dir, rust_lib_dir],
+    LIBS=['pocketjs_idf_render_rgb565', 'pocketjs_idf_ui_core'],
+)
+
+# The assembler's .incbin payload is invisible to SCons' dependency scanner.
+# Reassemble this tiny wrapper on every build so it always contains the current
+# .pocket container rather than a stale package object.
+AlwaysBuild(cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.o')
+
+# Keep the package itself visible in the project dependency graph as well.
+Depends(host_group, smoke_package)
+
+quickjs_group = DefineGroup(
+    'PocketJSQuickJS',
+    quickjs_src,
+    depend=[''],
+    LOCAL_CPPPATH=[quickjs_root],
+    LOCAL_CPPDEFINES=[
+        'EMSCRIPTEN',
+        'alloca=__builtin_alloca',
+        'CONFIG_VERSION="edgitalk-m55"',
+    ],
+    LOCAL_CFLAGS=' -std=gnu11 -Wno-unused-function -Wno-unused-variable -Wno-format -include ' +
+                 cwd + '/include/quickjs_platform.h',
+)
+
+Return('host_group', 'quickjs_group')

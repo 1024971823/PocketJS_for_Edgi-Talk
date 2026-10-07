@@ -1,0 +1,13 @@
+from building import *
+
+cwd = GetCurrentDir()
+
+group = DefineGroup(
+    'Applications',
+    Glob('*.c'),
+    depend=[''],
+    CPPPATH=[cwd, cwd + '/pocketjs/include'],
+)
+group += SConscript(cwd + '/pocketjs/SConscript')
+
+Return('group')

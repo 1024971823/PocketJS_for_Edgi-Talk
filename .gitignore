@@ -1,0 +1,7 @@
+build/
+Debug/
+__pycache__/
+*.o
+*.elf
+*.map
+.sconsign.dblite

@@ -1,0 +1,11 @@
+# PocketJS M55 project: only board support and the dedicated application are built.
+Import('RTT_ROOT')
+from building import *
+
+cwd = GetCurrentDir()
+objs = []
+
+objs += SConscript(cwd + '/board/SConscript')
+objs += SConscript(cwd + '/applications/SConscript')
+
+Return('objs')

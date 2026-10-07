@@ -1,0 +1,7 @@
+menu "PocketJS Configuration"
+
+    config BSP_USING_POCKETJS
+        bool "Enable PocketJS runtime"
+        default y
+
+endmenu
