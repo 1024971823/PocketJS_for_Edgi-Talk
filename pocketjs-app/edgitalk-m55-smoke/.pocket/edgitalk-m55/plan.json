@@ -1,0 +1,67 @@
+{
+  "app": {
+    "id": "dev.srakoul.edgitalk-smoke",
+    "title": "Beat Dash",
+    "version": "0.1.0",
+    "entry": "main.tsx",
+    "output": "edgitalk-m55-smoke",
+    "framework": "solid"
+  },
+  "presentation": {
+    "id": "default",
+    "entry": "main.tsx"
+  },
+  "target": {
+    "id": "edgitalk-m55",
+    "hostAbi": 1
+  },
+  "viewport": {
+    "logical": [
+      400,
+      240
+    ],
+    "physical": [
+      800,
+      480
+    ],
+    "presentation": "native",
+    "rasterDensity": 2,
+    "policy": "fixed"
+  },
+  "modality": {
+    "form": "takeover",
+    "screens": [
+      {
+        "role": "primary",
+        "logical": [
+          400,
+          240
+        ],
+        "orientation": "landscape",
+        "touch": true,
+        "resizable": false
+      }
+    ],
+    "touch": "primary",
+    "pointer": "none",
+    "buttons": false,
+    "analog": 0,
+    "text": "osk",
+    "glyphs": "letters"
+  },
+  "features": {
+    "input.touch": true,
+    "text.glyphs.baked": true
+  },
+  "companions": [],
+  "hostExtension": {
+    "kind": "esp-idf",
+    "version": 1,
+    "payload": {
+      "profileHash": "sha256:9970a620f3597b8ae2fe55beddd0ef35a7299dbdc28f1834c512f1afc470ddc3",
+      "tickHz": 30
+    },
+    "payloadHash": "sha256:a5558c5d6c833b0012d27b7d481e47e6d2d2ea9a0b09b8535bac946fc94bc082"
+  },
+  "planHash": "sha256:4307d550ef0f727457b6b13145ca3f625c8e8335b6166576552851cd5f68cfaa"
+}
