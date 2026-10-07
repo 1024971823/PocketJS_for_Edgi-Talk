@@ -1,0 +1,29 @@
+diff --git a/libraries/components/wifi-host-driver/porting/src/wlan/whd_wlan.c b/libraries/components/wifi-host-driver/porting/src/wlan/whd_wlan.c
+index 834ecd8e..d273352f 100644
+--- a/libraries/components/wifi-host-driver/porting/src/wlan/whd_wlan.c
++++ b/libraries/components/wifi-host-driver/porting/src/wlan/whd_wlan.c
+@@ -671,6 +671,13 @@ static void whd_init_thread (void *parameter)
+         return;
+     }
+ 
++    /* btc_mode=1 is also in NVRAM. Set it again so a live STA still yields the
++     * antenna to Bluetooth instead of starving the LE connection. */
++    if (whd_wifi_set_iovar_value(wifi_sta.whd_itf, "btc_mode", 1) != WHD_SUCCESS)
++    {
++        LOG_W("Failed to enable Wi-Fi/Bluetooth coexistence");
++    }
++
+     /* Bluetooth startup */
+     whd_bt_startup();
+ 
+@@ -759,6 +766,10 @@ static void whd_init_thread (void *parameter)
+ 
+ static int rt_hw_wifi_init (void)
+ {
++#ifdef POCKETJS_BT_ONLY
++    /* Bench only: leave the Wi-Fi core without firmware, so Bluetooth runs alone. */
++    return RT_EOK;
++#endif
+ #ifdef CY_WIFI_USING_THREAD_INIT
+     rt_thread_t tid;
+ 

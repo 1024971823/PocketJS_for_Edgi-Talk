@@ -1,0 +1,175 @@
+diff --git a/libraries/HAL_Drivers/drv_lcd.c b/libraries/HAL_Drivers/drv_lcd.c
+index 01889095..bdcc4c7a 100644
+--- a/libraries/HAL_Drivers/drv_lcd.c
++++ b/libraries/HAL_Drivers/drv_lcd.c
+@@ -572,11 +572,54 @@ static rt_bool_t lcd_axidmac_copy_rgb565_area(const uint16_t *src_pixels,
+ 
+ static void lcd_wait_present_done(void);
+ 
+-static void lcd_present_framebuffer(void)
++/* Present-path profile (cycles). Read over SWD: g_lcd_prof[0..5] = frames, clean,
++ * rotate, invalidate, set-framebuffer, wait. */
++volatile uint32_t g_lcd_prof[6];
++
++static inline uint32_t lcd_prof_now(void)
++{
++    return DWT->CYCCNT;
++}
++
++static void lcd_prof_enable(void)
++{
++    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
++    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
++}
++
++/* Point the display controller at the scanout buffer and wait for it to take the frame. */
++static void lcd_commit_scanout(void)
+ {
+     volatile cy_en_gfx_status_t status;
++    uint32_t t0 = lcd_prof_now();
++    uint32_t t1;
++
++    gfxbase->GFXSS_DC.DCNANO.GCREGFRAMEBUFFERSTRIDE = LCD_STRIDE * (LCD_BITS_PER_PIXEL / 8);
++    status = Cy_GFXSS_Set_FrameBuffer(gfxbase, lcd_scanout_framebuffer(), &lcd_gfx_context);
++    if (CY_GFX_SUCCESS != status)
++    {
++        LOG_E("[%s: %d] Image rendering failed. Error type: %u\r\n", __func__, __LINE__, status);
++        CY_ASSERT(0);
++    }
++    lcd_apply_gfxss_rotation();
++    t1 = lcd_prof_now();
++    g_lcd_prof[4] += t1 - t0;
++    lcd_wait_present_done();
++    g_lcd_prof[5] += lcd_prof_now() - t1;
++    g_lcd_prof[0]++;
++}
+ 
++static void lcd_present_framebuffer(void)
++{
++    uint32_t t0;
++    uint32_t t1;
++
++    lcd_prof_enable();
++    t0 = lcd_prof_now();
+     lcd_dcache_clean_range(lcd_render_framebuffer(), LCD_RENDER_BUF_SIZE);
++    t1 = lcd_prof_now();
++    g_lcd_prof[1] += t1 - t0;
++    t0 = t1;
+ #if LCD_ROTATION_BACKEND_VGLITE
+     lcd_dcache_invalidate_range(lcd_scanout_framebuffer(), LCD_SCANOUT_BUF_SIZE);
+     if (!lcd_vglite_rotate_to_scanout(lcd_render_framebuffer(),
+@@ -586,19 +629,107 @@ static void lcd_present_framebuffer(void)
+     {
+         return;
+     }
++    t1 = lcd_prof_now();
++    g_lcd_prof[2] += t1 - t0;
++    t0 = t1;
+     lcd_dcache_invalidate_range(lcd_scanout_framebuffer(), LCD_SCANOUT_BUF_SIZE);
++    t1 = lcd_prof_now();
++    g_lcd_prof[3] += t1 - t0;
+ #else
+     lcd_dcache_clean_range(lcd_scanout_framebuffer(), LCD_SCANOUT_BUF_SIZE);
+ #endif
+-    gfxbase->GFXSS_DC.DCNANO.GCREGFRAMEBUFFERSTRIDE = LCD_STRIDE * (LCD_BITS_PER_PIXEL / 8);
+-    status = Cy_GFXSS_Set_FrameBuffer(gfxbase, lcd_scanout_framebuffer(), &lcd_gfx_context);
+-    if (CY_GFX_SUCCESS != status)
++    lcd_commit_scanout();
++}
++
++/* Partial presents. With a 90 degree panel the GPU rotates the whole 800x480 frame in about
++ * 16 ms no matter how little changed, while a few thousand dirty pixels rotate on the CPU in
++ * well under a millisecond. Callers stage every dirty rectangle (render-buffer pixels) and then
++ * commit once. */
++#if LCD_ROTATION_BACKEND_VGLITE && (LCD_ROTATION_DEGREES == 90) && \
++    (LCD_LOGICAL_X_ADJUST_PIXELS == 0) && (LCD_SCANOUT_X_ADJUST_PIXELS == 0)
++#define LCD_CPU_ROTATE_RECT 1
++#else
++#define LCD_CPU_ROTATE_RECT 0
++#endif
++
++static rt_bool_t s_scanout_dirty;
++
++rt_bool_t lcd_stage_rect_rgb565(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
++{
++#if LCD_CPU_ROTATE_RECT
++    const uint16_t *src = (const uint16_t *)lcd_render_framebuffer();
++    uint16_t *dst = (uint16_t *)lcd_scanout_framebuffer();
++    uint32_t t0;
++    uint32_t t1;
++    uint32_t x1;
++    uint32_t y1;
++    uint32_t block;
++    uint32_t v;
++    uint32_t k;
++
++    if ((width == 0U) || (height == 0U) || (x >= LCD_LOGICAL_WIDTH) || (y >= LCD_LOGICAL_HEIGHT))
+     {
+-        LOG_E("[%s: %d] Image rendering failed. Error type: %u\r\n", __func__, __LINE__, status);
+-        CY_ASSERT(0);
++        return RT_FALSE;
+     }
+-    lcd_apply_gfxss_rotation();
+-    lcd_wait_present_done();
++    x1 = (x + width > LCD_LOGICAL_WIDTH) ? LCD_LOGICAL_WIDTH : (x + width);
++    y1 = (y + height > LCD_LOGICAL_HEIGHT) ? LCD_LOGICAL_HEIGHT : (y + height);
++
++    lcd_prof_enable();
++    t0 = lcd_prof_now();
++    /* src (u, v) -> scanout (LCD_WIDTH - 1 - v, u). Walk eight source columns at a time so the
++     * eight destination lines being written stay in the cache while v advances. */
++    for (block = x; block < x1; block += 8U)
++    {
++        const uint32_t count = ((x1 - block) < 8U) ? (x1 - block) : 8U;
++
++        for (v = y; v < y1; ++v)
++        {
++            const uint16_t *from = src + (size_t)v * LCD_RENDER_STRIDE + block;
++            uint16_t *to = dst + (size_t)block * LCD_STRIDE + (LCD_WIDTH - 1U - v);
++
++            for (k = 0U; k < count; ++k)
++            {
++                *to = from[k];
++                to += LCD_STRIDE;
++            }
++        }
++    }
++    t1 = lcd_prof_now();
++    g_lcd_prof[2] += t1 - t0;
++    /* The scanout lines [x, x1) are written across their full width; push them to memory. */
++    lcd_dcache_clean_range(dst + (size_t)x * LCD_STRIDE,
++                           (x1 - x) * LCD_STRIDE * (LCD_BITS_PER_PIXEL / 8));
++    g_lcd_prof[1] += lcd_prof_now() - t1;
++    s_scanout_dirty = RT_TRUE;
++    return RT_TRUE;
++#else
++    (void)x;
++    (void)y;
++    (void)width;
++    (void)height;
++    return RT_FALSE;
++#endif
++}
++
++/* Returns RT_FALSE when nothing was staged, so the caller can fall back to a full present. */
++rt_bool_t lcd_commit_rect_rgb565(void)
++{
++    if (!s_scanout_dirty)
++    {
++        return RT_FALSE;
++    }
++    s_scanout_dirty = RT_FALSE;
++    lcd_commit_scanout();
++    return RT_TRUE;
++}
++
++/* Debug switch, writable over SWD: non-zero forces every present through the full-frame GPU
++ * path (used to cross-check the partial path against it). */
++volatile uint32_t g_lcd_force_full;
++
++rt_bool_t lcd_rect_present_supported(void)
++{
++    return (LCD_CPU_ROTATE_RECT && (g_lcd_force_full == 0U)) ? RT_TRUE : RT_FALSE;
+ }
+ 
+ void lcd_flush_rgb565(const void *pixels, uint32_t width, uint32_t height)
