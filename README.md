@@ -8,6 +8,7 @@
 
 - `projects/Edgi_Talk_M55_PocketJS/`：M55 固件工程、使用文档、电脑上位机。
 - `pocketjs-app/edgitalk-m55-smoke/`：板上 QuickJS 界面的源码。
+- 界面 SoT 与 RT-Thread host native：fork [`1024971823/pocketjs`](https://github.com/1024971823/pocketjs) 的 `apps/edgitalk-m55-smoke/` 与 `hosts/rt-thread-edgitalk/native/`（见 `applications/pocketjs/README.md`，可设 `POCKETJS_ROOT`）。
 - `libraries/components/bt-fw-ifx-cyw55500a1/`：CYW55513 蓝牙控制器补丁。固件用其中 `COMPONENT_wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN`。
 - `bsp-patches/`：打到上游 BSP 上的三处改动。LCD 局部刷新、蓝牙串口 `uart4`、Wi-Fi 侧再次设置 `btc_mode=1`。
 

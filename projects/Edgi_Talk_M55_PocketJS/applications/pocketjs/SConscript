@@ -1,16 +1,73 @@
+# Edgi-Talk product PocketJS SCons.
+#
+# Prefer the monorepo host fragment when POCKETJS_ROOT points at a
+# 1024971823/pocketjs (or pocket-nexus/pocketjs) clone that has
+# hosts/rt-thread-edgitalk/native/SConscript. Fallback: full in-tree sources
+# so this overlay still builds alone.
+#
+# Typical:
+#   export POCKETJS_ROOT=/path/to/pocketjs
+#   export POCKETJS_NATIVE_HOST_LOOP=0          # keep overlay pocketjs_app.c for now
+#   export POCKETJS_NATIVE_PACKAGE_STUB=0       # use applications/pocketjs/generated/
+#   export POCKETJS_QUICKJS_ROOT=/path/to/quickjs-ng   # optional
+
 import os
 from building import *
 
 cwd = GetCurrentDir()
+pocketjs_root = os.environ.get('POCKETJS_ROOT')
+native_sc = None
+if pocketjs_root:
+    candidate = os.path.join(pocketjs_root, 'hosts/rt-thread-edgitalk/native/SConscript')
+    if os.path.isfile(candidate):
+        native_sc = candidate
+
+bt_fw = os.path.abspath(cwd + '/../../../../libraries/components/bt-fw-ifx-cyw55500a1/COMPONENT_wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN/btfw.c')
+
+product_src = [
+    cwd + '/pocketjs_dashboard.c',
+    cwd + '/pocketjs_music.c',
+    cwd + '/pocketjs_synth.c',
+    cwd + '/pocketjs_game.c',
+    cwd + '/pocketjs_wifi.c',
+    cwd + '/pocketjs_bt.c',
+    bt_fw,
+    cwd + '/generated/pocketjs_package_edgitalk_smoke.c',
+    cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.S',
+]
+
+debug_flags = ' -DPOCKETJS_DEBUG_TOUCH' if os.environ.get('POCKETJS_DEBUG_TOUCH') else ''
+
+if native_sc:
+    # Shared stack + shims (+ optional host loop) from monorepo.
+    # Default: keep overlay pocketjs_app.c until board hooks are bound.
+    os.environ.setdefault('POCKETJS_NATIVE_HOST_LOOP', '0')
+    os.environ.setdefault('POCKETJS_NATIVE_PACKAGE_STUB', '0')
+    host_group, quickjs_group = SConscript(native_sc)
+
+    product_src = [cwd + '/pocketjs_app.c'] + product_src
+    product_path = [cwd + '/include', cwd + '/generated']
+    product_group = DefineGroup(
+        'PocketJSProduct',
+        product_src,
+        depend=[''],
+        LOCAL_CPPPATH=product_path,
+        LOCAL_CFLAGS=' -std=gnu11 -Wno-unused-function -Wno-unused-variable -Wno-format' +
+                     debug_flags,
+    )
+    AlwaysBuild(cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.o')
+    Return('host_group', 'quickjs_group', 'product_group')
+
+# ---- Fallback: full in-tree build (no POCKETJS_ROOT) ----
 repo_root = os.path.abspath(cwd + '/../../../../../pocketjs')
-quickjs_root = os.path.abspath(cwd + '/../../../../../quickjs-ng')
+quickjs_root = os.environ.get(
+    'POCKETJS_QUICKJS_ROOT',
+    os.path.abspath(cwd + '/../../../../../quickjs-ng'))
 
 idf_root = repo_root + '/hosts/esp-idf/components'
 rust_lib_dir = repo_root + '/hosts/esp-idf/native/ui-core/target/thumbv8m.main-none-eabihf/release'
 renderer_rust_lib_dir = repo_root + '/hosts/esp-idf/native/render-rgb565/target/thumbv8m.main-none-eabihf/release'
 smoke_package = repo_root + '/apps/edgitalk-m55-smoke/dist/edgitalk-m55-smoke.pocket'
-# CYW55513 module on this kit: bsp.mk component wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN.
-bt_fw = os.path.abspath(cwd + '/../../../../libraries/components/bt-fw-ifx-cyw55500a1/COMPONENT_wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN/btfw.c')
 
 host_src = [
     cwd + '/pocketjs_app.c',
@@ -50,9 +107,6 @@ path = [
     idf_root + '/pocketjs_render_rgb565/include',
 ]
 
-# Optional bench build: POCKETJS_DEBUG_TOUCH=1 scons ... adds an SWD touch-injection hook.
-debug_flags = ' -DPOCKETJS_DEBUG_TOUCH' if os.environ.get('POCKETJS_DEBUG_TOUCH') else ''
-
 host_group = DefineGroup(
     'PocketJS',
     host_src,
@@ -64,12 +118,7 @@ host_group = DefineGroup(
     LIBS=['pocketjs_idf_render_rgb565', 'pocketjs_idf_ui_core'],
 )
 
-# The assembler's .incbin payload is invisible to SCons' dependency scanner.
-# Reassemble this tiny wrapper on every build so it always contains the current
-# .pocket container rather than a stale package object.
 AlwaysBuild(cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.o')
-
-# Keep the package itself visible in the project dependency graph as well.
 Depends(host_group, smoke_package)
 
 quickjs_group = DefineGroup(
