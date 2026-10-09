@@ -149,7 +149,7 @@ export function Home(props: HomeProps): JSX.Element {
           value={() => compactTemperature(props.status().temp)}
           percent={() => (props.status().temp > UNKNOWN_TEMP ? Math.min(100, Math.max(0, props.status().temp / 10)) : 0)}
         />
-        <Ring x={109} y={66} caption="FPS" value={() => `${props.status().fps}`} percent={() => Math.min(100, (props.status().fps * 100) / 30)} />
+        <Ring x={109} y={66} caption="FLASH" value={() => `${clampPercent(props.status().flash)}%`} percent={() => props.status().flash} />
         {/* Tapping the system card opens the PC monitor. */}
         <Focusable
           debugName="PcEntry"

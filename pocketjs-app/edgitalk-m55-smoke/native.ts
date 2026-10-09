@@ -12,6 +12,8 @@ export interface DashboardStatus {
   cpu: number;
   ram: number;
   fps: number;
+  /** Percent of /flash already used. */
+  flash: number;
   temp: number;
   tempSource: number;
   wifi: boolean;
@@ -83,6 +85,7 @@ export const fallbackStatus: DashboardStatus = {
   cpu: 0,
   ram: 0,
   fps: TICK_HZ,
+  flash: 0,
   temp: UNKNOWN_TEMP,
   tempSource: 0,
   wifi: false,
@@ -125,6 +128,7 @@ export function readStatus(): DashboardStatus {
     cpu: num(n.cpu, fallbackStatus.cpu),
     ram: num(n.ram, fallbackStatus.ram),
     fps: num(n.fps, fallbackStatus.fps),
+    flash: num(n.flash, fallbackStatus.flash),
     temp: num(n.temp, fallbackStatus.temp),
     tempSource: num(n.tempSource, fallbackStatus.tempSource),
     wifi: n.wifi === true,

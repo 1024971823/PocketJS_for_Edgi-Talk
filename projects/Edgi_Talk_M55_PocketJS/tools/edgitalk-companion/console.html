@@ -16,148 +16,339 @@
       --warn: #8c3a32;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; }
+    html, body { margin: 0; height: 100%; }
     body {
-      min-height: 100vh;
       background: var(--paper);
       color: var(--ink);
-      font: 17px/1.45 Palatino, "Palatino Linotype", "Songti SC", "Noto Serif CJK SC", serif;
+      font: 16px/1.6 Palatino, "Palatino Linotype", "Songti SC", "Noto Serif CJK SC", serif;
     }
-    main { max-width: 860px; margin: 0 auto; padding: 48px 28px 72px; }
-    .eyebrow {
-      margin: 0;
-      font-family: "Source Code Pro", ui-monospace, monospace;
-      font-size: 12px;
-      letter-spacing: 0.16em;
-      color: var(--muted);
+    .dock {
+      position: fixed;
+      top: 40px;
+      right: 40px;
+      z-index: 2;
+      display: flex;
+      align-items: stretch;
+      max-height: calc(100vh - 80px);
     }
-    h1 { margin: 10px 0 0; font-weight: 600; font-size: 40px; letter-spacing: -0.03em; }
-    #link { margin: 12px 0 0; color: var(--muted); min-height: 1.45em; }
-    section {
-      margin-top: 28px;
-      padding: 22px 24px 20px;
-      background: var(--card);
-      border: 1px solid var(--line);
-    }
-    h2 { margin: 0 0 16px; font-size: 22px; font-weight: 600; }
-    label { display: block; margin-bottom: 6px; }
-    .hint { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
-    input[type="text"], input[type="password"] {
-      width: 100%;
-      max-width: 280px;
-      padding: 10px 12px;
+    .tab {
+      align-self: center;
+      width: 40px;
+      min-height: 96px;
+      padding: 16px 0;
       border: 1px solid var(--ink);
+      border-right: 0;
+      background: var(--card);
+      color: var(--ink);
+      font: 12px/1.2 "Source Code Pro", ui-monospace, monospace;
+      letter-spacing: 0.18em;
+      writing-mode: vertical-rl;
+      cursor: pointer;
+    }
+    .tab:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+    .widget {
+      width: min(368px, calc(100vw - 96px));
+      max-height: calc(100vh - 80px);
+      overflow: auto;
+      background: var(--card);
+      border: 1px solid var(--ink);
+      display: flex;
+      flex-direction: column;
+      transition: transform 180ms ease, opacity 180ms ease;
+    }
+    body.shut .widget {
+      transform: translateX(12px);
+      opacity: 0;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .widget { transition: none; }
+    }
+    header {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 36px 36px 0;
+    }
+    #pageName {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 500;
+      line-height: 1.15;
+      letter-spacing: 0.02em;
+    }
+    #link {
+      margin: 0;
+      min-height: 1.5em;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 16em;
+    }
+    .stage { display: flex; align-items: stretch; }
+    .pane { flex: 1; min-width: 0; padding: 32px 36px 48px; }
+    section { display: none; }
+    section.on { display: block; }
+    h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .block { display: flex; flex-direction: column; gap: 36px; }
+    .field { display: flex; flex-direction: column; gap: 12px; }
+    label { display: block; margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+    .hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    input:not([type="file"]) {
+      appearance: none;
+      width: 100%;
+      padding: 4px 0 12px;
+      border: 0;
+      border-bottom: 1px solid var(--ink);
+      border-radius: 0;
       background: transparent;
       color: var(--ink);
-      font: 22px/1 "Source Code Pro", ui-monospace, monospace;
+      font: 20px/1.3 "Source Code Pro", ui-monospace, monospace;
     }
-    input:focus { outline: 2px solid var(--teal); outline-offset: 2px; }
-    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+    #code { font-size: 28px; letter-spacing: 0.22em; }
+    input::placeholder { color: #a3988c; }
+    input:focus { outline: 2px solid var(--teal); outline-offset: 4px; }
+    .fileline { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+    .fileline span { color: var(--muted); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .actions { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
     button {
       border: 1px solid var(--ink);
       background: transparent;
       color: var(--ink);
-      font: 16px/1 Palatino, "Palatino Linotype", "Songti SC", serif;
+      font: 15px/1.2 Palatino, "Palatino Linotype", "Songti SC", serif;
       padding: 10px 16px;
+      min-height: 40px;
       cursor: pointer;
     }
     button.primary { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); }
     button[aria-pressed="true"] { background: var(--ink); color: var(--card); }
     button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
     button:disabled { opacity: 0.45; cursor: default; }
-    .note { margin: 12px 0 0; min-height: 1.45em; color: var(--muted); }
+    .note { margin: 0; min-height: 1.6em; color: var(--muted); font-size: 13px; line-height: 1.6; }
     .note.warn { color: var(--warn); }
-    .figures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
-    .figures div { border-top: 1px solid var(--line); padding-top: 10px; }
+    .figures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 48px; }
+    .figures div { display: flex; flex-direction: column; gap: 10px; }
     .figures b {
-      display: block;
-      margin-top: 4px;
       font-family: "Source Code Pro", ui-monospace, monospace;
-      font-size: 34px;
+      font-size: 36px;
       font-weight: 500;
-      letter-spacing: -0.04em;
+      line-height: 1;
+      letter-spacing: -0.03em;
     }
-    .figures span { color: var(--muted); font-size: 14px; }
+    .figures span { color: var(--muted); font-size: 12px; line-height: 1.4; letter-spacing: 0.12em; }
+    .figures b + span { letter-spacing: 0; font-size: 13px; }
     .file {
       display: inline-block;
-      padding: 10px 16px;
+      padding: 8px 10px;
       border: 1px dashed var(--ink);
       cursor: pointer;
     }
     .file input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-    @media (max-width: 700px) {
-      h1 { font-size: 32px; }
-      .figures { grid-template-columns: 1fr 1fr; }
-      main { padding: 32px 18px 56px; }
+    .meter { display: none; height: 8px; border: 1px solid var(--ink); }
+    .meter.on { display: block; }
+    .meter > div { height: 100%; width: 0; background: var(--teal); }
+    .meter.pack > div { width: 28%; animation: meter-slide 1.1s ease-in-out infinite; }
+    @keyframes meter-slide {
+      0% { margin-left: 0; }
+      50% { margin-left: 72%; }
+      100% { margin-left: 0; }
     }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: auto;
+      padding: 8px 16px 20px;
+    }
+    .nudge {
+      width: 44px;
+      height: 44px;
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font: 24px/1 Palatino, serif;
+      cursor: pointer;
+    }
+    .nudge:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+    .dots { display: flex; gap: 4px; justify-content: center; padding: 0; }
+    .dots button {
+      width: 28px;
+      height: 28px;
+      min-height: 28px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .dots button::before {
+      content: "";
+      display: block;
+      width: 7px;
+      height: 7px;
+      margin: 10px auto 0;
+      border-radius: 50%;
+      border: 1px solid var(--ink);
+    }
+    .dots button[aria-current="true"]::before { background: var(--ink); }
   </style>
 </head>
 <body>
-  <main>
-    <p class="eyebrow">EDGI TALK</p>
-    <h1>把这台电脑接到板子上</h1>
-    <p id="link">正在这个网络里找板子…</p>
+  <div class="dock">
+    <button class="tab" id="drawerTab" type="button" aria-expanded="true" aria-controls="widget">EDGI</button>
+    <div class="widget" id="widget">
+      <header>
+        <p id="pageName">连接</p>
+        <p id="link">正在找板子…</p>
+      </header>
+      <div class="stage">
+        <div class="pane">
+          <section class="on" data-page="连接" aria-labelledby="pageName">
+            <h2>配对码</h2>
+            <div class="block">
+              <div class="field">
+                <label for="code">设置页六位数字</label>
+                <input id="code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="996459">
+              </div>
+              <div class="actions">
+                <div class="row">
+                  <button class="primary" id="connect" type="button">连接</button>
+                  <button id="again" type="button">再找</button>
+                </div>
+              </div>
+              <p class="note" id="findNote"></p>
+            </div>
+          </section>
 
-    <section>
-      <h2>配对码</h2>
-      <label for="code">设置页右侧的六位数字</label>
-      <input id="code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="123456">
-      <p class="hint">地址不用填。先找蓝牙名字 EdgiTalk，找不到再找 Wi-Fi。</p>
-      <div class="row">
-        <button class="primary" id="connect" type="button">连接</button>
-        <button id="again" type="button">重新寻找</button>
-      </div>
-      <p class="note" id="findNote"></p>
-    </section>
+          <section data-page="电脑">
+            <h2>这台电脑</h2>
+            <div class="block">
+              <div class="figures">
+                <div><span>CPU</span><b id="cpu">--</b></div>
+                <div><span>内存</span><b id="ram">--</b><span id="ramDetail"></span></div>
+                <div><span>磁盘</span><b id="disk">--</b><span id="diskDetail"></span></div>
+                <div><span>温度</span><b id="temp">--</b></div>
+              </div>
+              <div class="actions">
+                <div class="row">
+                  <button class="primary" id="send" type="button">发给板子</button>
+                  <button id="sync" type="button">校准时间</button>
+                </div>
+                <div class="row">
+                  <button type="button" data-interval="1" aria-pressed="false">1 秒</button>
+                  <button type="button" data-interval="2" aria-pressed="true">2 秒</button>
+                  <button type="button" data-interval="5" aria-pressed="false">5 秒</button>
+                </div>
+              </div>
+              <p class="note" id="sendNote"></p>
+            </div>
+          </section>
 
-    <section>
-      <h2>这台电脑</h2>
-      <div class="figures">
-        <div><span>CPU</span><b id="cpu">--</b></div>
-        <div><span>内存</span><b id="ram">--</b><span id="ramDetail"></span></div>
-        <div><span>磁盘</span><b id="disk">--</b><span id="diskDetail"></span></div>
-        <div><span>温度</span><b id="temp">--</b></div>
-      </div>
-      <div class="row">
-        <button class="primary" id="send" type="button">发给板子</button>
-        <button type="button" data-interval="1" aria-pressed="false">1 秒</button>
-        <button type="button" data-interval="2" aria-pressed="true">2 秒</button>
-        <button type="button" data-interval="5" aria-pressed="false">5 秒</button>
-        <button id="sync" type="button">只校准时间</button>
-      </div>
-      <p class="note" id="sendNote"></p>
-    </section>
+          <section data-page="播放器">
+            <h2>主页播放器</h2>
+            <div class="block">
+              <div class="fileline">
+                <label class="file">选择音频<input id="musicFile" type="file" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg"></label>
+                <span id="musicName">还没有文件</span>
+              </div>
+              <div class="field">
+                <label for="musicTitle">歌名，16 个英文字</label>
+                <input id="musicTitle" type="text" maxlength="16" placeholder="Track">
+              </div>
+              <div class="actions">
+                <button class="primary" id="musicSend" type="button">传到播放器</button>
+              </div>
+              <div class="meter" id="musicMeter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div id="musicMeterFill"></div>
+              </div>
+              <p class="note" id="musicNote"></p>
+            </div>
+          </section>
 
-    <section>
-      <h2>一首曲子</h2>
-      <div class="row">
-        <label class="file">选择 MIDI 或 JSON<input id="file" type="file" accept=".mid,.midi,.json,audio/midi,application/json"></label>
-        <span id="filename">还没有选择文件</span>
+          <section data-page="谱面">
+            <h2>一首曲子</h2>
+            <div class="block">
+              <div class="fileline">
+                <label class="file">MIDI 或 JSON<input id="file" type="file" accept=".mid,.midi,.json,audio/midi,application/json"></label>
+                <span id="filename">还没有文件</span>
+              </div>
+              <div class="field">
+                <label for="title">标题，12 个英文字</label>
+                <input id="title" type="text" maxlength="12" placeholder="My Song">
+              </div>
+              <div class="row" id="levels">
+                <button type="button" data-level="1" aria-pressed="false">难度 1</button>
+                <button type="button" data-level="2" aria-pressed="true">难度 2</button>
+                <button type="button" data-level="3" aria-pressed="false">难度 3</button>
+              </div>
+              <p class="hint" id="chartNote">选一个 MIDI 或谱面 JSON。</p>
+              <div class="actions">
+                <button class="primary" id="push" type="button">推到板子</button>
+                <div class="row">
+                  <button id="pull" type="button">取回</button>
+                  <button id="clear" type="button">删掉</button>
+                  <button id="scores" type="button">最高分</button>
+                </div>
+              </div>
+              <p class="note" id="songNote"></p>
+            </div>
+          </section>
+        </div>
       </div>
-      <div class="row">
-        <label for="title">标题，最多 12 个英文字</label>
-      </div>
-      <input id="title" type="text" maxlength="12" placeholder="My Song">
-      <div class="row" id="levels">
-        <button type="button" data-level="1" aria-pressed="false">难度 1</button>
-        <button type="button" data-level="2" aria-pressed="true">难度 2</button>
-        <button type="button" data-level="3" aria-pressed="false">难度 3</button>
-      </div>
-      <p class="hint" id="chartNote">选一个 MIDI 或谱面 JSON。</p>
-      <div class="row">
-        <button class="primary" id="push" type="button">推到板子</button>
-        <button id="pull" type="button">从板子取回</button>
-        <button id="clear" type="button">删掉板上的曲子</button>
-        <button id="scores" type="button">看最高分</button>
-      </div>
-      <p class="note" id="songNote"></p>
-    </section>
-  </main>
+      <nav class="nav">
+        <button class="nudge" id="prevPage" type="button" aria-label="上一页">‹</button>
+        <div class="dots" id="dots"></div>
+        <button class="nudge" id="nextPage" type="button" aria-label="下一页">›</button>
+      </nav>
+    </div>
+  </div>
   <script>
     const $ = (id) => document.getElementById(id);
+    const pages = [...document.querySelectorAll("section[data-page]")];
+    let page = Number(localStorage.getItem("edgi-page") || 0);
+    if (!Number.isInteger(page) || page < 0 || page >= pages.length) page = 0;
     let level = 2;
     let clearArmed = false;
     let codeFilled = false;
+
+    function showPage(index) {
+      page = (index + pages.length) % pages.length;
+      localStorage.setItem("edgi-page", String(page));
+      pages.forEach((section, i) => section.classList.toggle("on", i === page));
+      $("pageName").textContent = pages[page].dataset.page;
+      document.querySelectorAll("#dots button").forEach((dot, i) => {
+        if (i === page) dot.setAttribute("aria-current", "true");
+        else dot.removeAttribute("aria-current");
+      });
+    }
+
+    function setDrawer(open) {
+      document.body.classList.toggle("shut", !open);
+      $("drawerTab").setAttribute("aria-expanded", String(open));
+      localStorage.setItem("edgi-drawer", open ? "open" : "shut");
+    }
+
+    pages.forEach((section, i) => {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.setAttribute("aria-label", section.dataset.page);
+      dot.onclick = () => showPage(i);
+      $("dots").appendChild(dot);
+    });
+    showPage(page);
+    setDrawer(localStorage.getItem("edgi-drawer") !== "shut");
+    $("drawerTab").onclick = () => setDrawer(document.body.classList.contains("shut"));
+    $("prevPage").onclick = () => showPage(page - 1);
+    $("nextPage").onclick = () => showPage(page + 1);
+    document.addEventListener("keydown", (event) => {
+      if (event.target.closest("input")) return;
+      if (event.key === "ArrowLeft") showPage(page - 1);
+      if (event.key === "ArrowRight") showPage(page + 1);
+    });
 
     function note(id, text, warn) {
       const el = $(id);
@@ -199,6 +390,8 @@
       if (state.chartNote) $("chartNote").textContent = state.chartNote;
       note("sendNote", state.sendNote, state.sendNote && state.sendNote.indexOf("已") !== 0 && state.sendNote.indexOf("正在") !== 0);
       if (state.songNote) note("songNote", state.songNote, false);
+      if (state.musicNote) note("musicNote", state.musicNote, false);
+      paintMeter(state.musicProgress);
     }
 
     async function call(path, body, noteId) {
@@ -248,6 +441,63 @@
         note("songNote", error.message, true);
       }
     }
+
+    $("musicFile").onchange = () => {
+      const file = $("musicFile").files[0];
+      if (!file) return;
+      $("musicName").textContent = file.name;
+      if (!$("musicTitle").value) {
+        $("musicTitle").value = file.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9 _-]/g, "").trim().slice(0, 16);
+      }
+    };
+    function paintMeter(progress) {
+      const meter = $("musicMeter");
+      const fill = $("musicMeterFill");
+      if (!progress || !progress.active) {
+        meter.className = "meter";
+        meter.setAttribute("aria-valuenow", "0");
+        fill.style.width = "0";
+        fill.style.marginLeft = "0";
+        return;
+      }
+      if (progress.phase === "pack") {
+        meter.className = "meter on pack";
+        meter.setAttribute("aria-valuenow", "0");
+        return;
+      }
+      const pct = progress.total ? Math.min(100, Math.round(progress.sent * 100 / progress.total)) : 0;
+      meter.className = "meter on";
+      meter.setAttribute("aria-valuenow", String(pct));
+      fill.style.width = pct + "%";
+      fill.style.marginLeft = "0";
+    }
+
+    $("musicSend").onclick = async () => {
+      const file = $("musicFile").files[0];
+      if (!file) {
+        note("musicNote", "先选择一首歌。", true);
+        return;
+      }
+      const body = new FormData();
+      body.append("file", file);
+      body.append("title", $("musicTitle").value.trim());
+      $("musicSend").disabled = true;
+      note("musicNote", "正在压缩…", false);
+      paintMeter({ active: true, phase: "pack", sent: 0, total: 0 });
+      const watch = setInterval(poll, 400);
+      try {
+        const response = await fetch("/api/local/music", { method: "POST", body });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || "没有传上去");
+        apply(data);
+      } catch (error) {
+        paintMeter(null);
+        note("musicNote", error.message, true);
+      } finally {
+        clearInterval(watch);
+        $("musicSend").disabled = false;
+      }
+    };
 
     $("push").onclick = () => call("/api/local/push", {}, "songNote");
     $("scores").onclick = () => call("/api/local/scores", {}, "songNote");

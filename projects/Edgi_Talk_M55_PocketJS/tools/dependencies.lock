@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "git": {
+    "pocketjs": "25081f644a39426f3c63c90aad8cb5f3fcdecdfa",
+    "quickjs-ng": "19dbe8524c1a7357d268cb586ee315616984fef8"
+  },
+  "sha256": {
+    "pocketjs/apps/edgitalk-m55-smoke/dist/edgitalk-m55-smoke.pocket": "c3c761840a453e744b68586c5c25f1dcf84d7386ad24cb3b0c2e11911ee78dd0",
+    "pocketjs/hosts/esp-idf/native/render-rgb565/target/thumbv8m.main-none-eabihf/release/libpocketjs_idf_render_rgb565.a": "3b1e9ec999f6696cc0d3f6a082e129d780decd7017f3c45f414e317200d3a3a4",
+    "pocketjs/hosts/esp-idf/native/ui-core/target/thumbv8m.main-none-eabihf/release/libpocketjs_idf_ui_core.a": "1c91c0648b933f147a5f432f63d58766991c933028abc7cb1bfa41b1d31dd30b"
+  }
+}

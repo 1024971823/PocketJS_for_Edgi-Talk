@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #define POCKETJS_GAME_MAX_EVENTS 2000U
+#define POCKETJS_GAME_MAX_NOTES  2000U
 
 typedef struct
 {

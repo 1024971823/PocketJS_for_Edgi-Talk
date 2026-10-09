@@ -47,6 +47,8 @@ void pocketjs_game_set_offset(int ms);
 
 /* Custom song stored on /flash (uploaded by the PC companion). */
 int pocketjs_game_custom_open(void);
+/* Read the staged upload through its open fd without replacing the saved song. */
+char *pocketjs_game_custom_staged_read(int fd, size_t *length);
 bool pocketjs_game_custom_commit(int fd, size_t total);
 void pocketjs_game_custom_abort(int fd);
 bool pocketjs_game_custom_clear(void);

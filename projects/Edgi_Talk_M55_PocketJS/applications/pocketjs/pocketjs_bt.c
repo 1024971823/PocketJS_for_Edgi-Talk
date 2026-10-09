@@ -10,13 +10,26 @@
 #include "pocketjs_bt.h"
 #include "pocketjs_dashboard.h"
 #include "pocketjs_game.h"
+#include "pocketjs_music.h"
 
 #include <rtdevice.h>
 #include <cycfg_peripherals.h>
 #include <cycfg_pins.h>
 #include <cycfg_connectivity_bt.h>
 #include <cy_scb_uart.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/statfs.h>
+#include <unistd.h>
+
+#define MUSIC_TEMP      "/flash/m_incoming.wav"
+#define MUSIC_NAME_MAX  16
+#define MUSIC_BYTE_MAX  (380U * 1024U)
 
 #define HCI_RESET            0x0C03U
 #define HCI_SET_EVENT_MASK   0x0C01U
@@ -55,6 +68,10 @@ static struct rt_semaphore s_rx_sem;
 static rt_bool_t s_advertising;
 static uint16_t s_handle = 0xFFFFU;
 static uint8_t s_json[320];
+static uint8_t *s_music_buf;
+static uint32_t s_music_expect;
+static uint32_t s_music_got;
+static char s_music_name[MUSIC_NAME_MAX + 1U];
 static uint8_t s_l2cap[320];
 static uint16_t s_l2cap_len;
 
@@ -557,6 +574,8 @@ static rt_bool_t token_matches(const char *json)
 {
     char expected[8];
     const char *found;
+    rt_uint8_t difference = 0U;
+    rt_size_t i;
 
     if (!pocketjs_game_token(expected))
     {
@@ -568,22 +587,248 @@ static rt_bool_t token_matches(const char *json)
         return RT_FALSE;
     }
     found += 9;
-    return rt_strncmp(found, expected, 6) == 0 && found[6] == '"';
+    for (i = 0U; i < 6U; ++i)
+    {
+        difference |= (rt_uint8_t)((rt_uint8_t)found[i] ^ (rt_uint8_t)expected[i]);
+    }
+    return difference == 0U && found[6] == '"';
+}
+
+static rt_bool_t token_bytes_match(const uint8_t *supplied, const char *expected,
+                                   rt_size_t length)
+{
+    rt_uint8_t difference = 0U;
+    rt_size_t i;
+
+    for (i = 0U; i < length; ++i)
+    {
+        difference |= (rt_uint8_t)(supplied[i] ^ (rt_uint8_t)expected[i]);
+    }
+    return difference == 0U;
+}
+
+static void music_abort(void)
+{
+    if (s_music_buf != RT_NULL)
+    {
+        rt_free(s_music_buf);
+        s_music_buf = RT_NULL;
+    }
+    unlink(MUSIC_TEMP);
+    s_music_expect = 0U;
+    s_music_got = 0U;
+    s_music_name[0] = '\0';
+}
+
+static void music_drop_old(void)
+{
+    DIR *dir = opendir("/flash");
+    struct dirent *entry;
+
+    if (dir == RT_NULL)
+    {
+        return;
+    }
+    while ((entry = readdir(dir)) != RT_NULL)
+    {
+        char path[48];
+
+        if (strncmp(entry->d_name, "m_", 2) != 0 || strncmp(entry->d_name, "m_incoming", 10) == 0)
+        {
+            continue;
+        }
+        if (snprintf(path, sizeof(path), "/flash/%s", entry->d_name) > 0)
+        {
+            unlink(path);
+        }
+    }
+    closedir(dir);
+}
+
+static rt_bool_t music_name_ok(const uint8_t *name, uint8_t length)
+{
+    uint8_t i;
+
+    if (length < 1U || length > MUSIC_NAME_MAX)
+    {
+        return RT_FALSE;
+    }
+    for (i = 0; i < length; ++i)
+    {
+        unsigned char ch = name[i];
+
+        if (!isalnum(ch) && ch != ' ' && ch != '_' && ch != '-')
+        {
+            return RT_FALSE;
+        }
+    }
+    return RT_TRUE;
+}
+
+/* Home-player frames on the stats characteristic:
+ *   'M' + token + uint32 size + name length + name, then 'D' + bytes, then 'E'. */
+static rt_bool_t accept_music(const uint8_t *value, uint16_t length)
+{
+    if (length < 1U)
+    {
+        return RT_FALSE;
+    }
+    if (value[0] == 'M' && length >= 13U)
+    {
+        char token[8];
+        struct statfs info;
+        uint32_t size = (uint32_t)value[7] | ((uint32_t)value[8] << 8) |
+                        ((uint32_t)value[9] << 16) | ((uint32_t)value[10] << 24);
+        uint8_t name_len = value[11];
+
+        music_abort();
+        music_drop_old();
+        if (!pocketjs_game_token(token) || !token_bytes_match(value + 1, token, 6U) ||
+            size < 44U || size > MUSIC_BYTE_MAX ||
+            (uint16_t)(12U + name_len) > length || !music_name_ok(value + 12, name_len))
+        {
+            rt_kprintf("[pjsbt] music rejected header\n");
+            return RT_FALSE;
+        }
+        if (statfs("/flash", &info) == 0 && info.f_bsize != 0U &&
+            (uint64_t)info.f_bfree * (uint64_t)info.f_bsize < (uint64_t)size)
+        {
+            rt_kprintf("[pjsbt] music rejected space free %u\n",
+                       (unsigned int)((uint64_t)info.f_bfree * (uint64_t)info.f_bsize));
+            return RT_FALSE;
+        }
+        memcpy(s_music_name, value + 12, name_len);
+        s_music_name[name_len] = '\0';
+        s_music_buf = rt_malloc(size);
+        if (s_music_buf == RT_NULL)
+        {
+            rt_kprintf("[pjsbt] music rejected open\n");
+            return RT_FALSE;
+        }
+        s_music_expect = size;
+        s_music_got = 0U;
+        rt_kprintf("[pjsbt] music begin %s %u\n", s_music_name, (unsigned int)size);
+        return RT_TRUE;
+    }
+    if (value[0] == 'D' && s_music_buf != RT_NULL && length > 1U)
+    {
+        uint16_t chunk = (uint16_t)(length - 1U);
+
+        if ((uint32_t)chunk + s_music_got > s_music_expect)
+        {
+            music_abort();
+            rt_kprintf("[pjsbt] music rejected size\n");
+            return RT_FALSE;
+        }
+        memcpy(s_music_buf + s_music_got, value + 1, chunk);
+        s_music_got += chunk;
+        return RT_TRUE;
+    }
+    if (value[0] == 'E' && s_music_buf != RT_NULL)
+    {
+        char path[48];
+        const char *ext = RT_NULL;
+        uint32_t got = s_music_got;
+        uint32_t expect = s_music_expect;
+        uint32_t left;
+        uint8_t *cursor;
+        int fd;
+
+        if (got != expect)
+        {
+            music_abort();
+            rt_kprintf("[pjsbt] music rejected\n");
+            return RT_FALSE;
+        }
+        if (expect >= 4U && memcmp(s_music_buf, "RIFF", 4) == 0)
+        {
+            ext = ".wav";
+        }
+        else if (expect >= 3U && (memcmp(s_music_buf, "ID3", 3) == 0 ||
+                                  (s_music_buf[0] == 0xFFU && (s_music_buf[1] & 0xE0U) == 0xE0U)))
+        {
+            ext = ".mp3";
+        }
+        if (ext == RT_NULL ||
+            snprintf(path, sizeof(path), "/flash/m_%s%s", s_music_name, ext) <= 0)
+        {
+            music_abort();
+            rt_kprintf("[pjsbt] music rejected\n");
+            return RT_FALSE;
+        }
+        fd = open(MUSIC_TEMP, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        left = expect;
+        cursor = s_music_buf;
+        while (fd >= 0 && left > 0U)
+        {
+            int wrote = (int)write(fd, cursor, left > 4096U ? 4096U : left);
+
+            if (wrote <= 0)
+            {
+                rt_kprintf("[pjsbt] music write %d errno %d\n", wrote, errno);
+                break;
+            }
+            cursor += wrote;
+            left -= (uint32_t)wrote;
+        }
+        if (fd >= 0)
+        {
+            close(fd);
+        }
+        rt_free(s_music_buf);
+        s_music_buf = RT_NULL;
+        s_music_expect = 0U;
+        s_music_got = 0U;
+        if (fd < 0 || left > 0U)
+        {
+            unlink(MUSIC_TEMP);
+            rt_kprintf("[pjsbt] music rejected\n");
+            return RT_FALSE;
+        }
+        unlink(path);
+        if (rename(MUSIC_TEMP, path) != 0)
+        {
+            unlink(MUSIC_TEMP);
+            rt_kprintf("[pjsbt] music rejected\n");
+            return RT_FALSE;
+        }
+        pocketjs_music_focus(s_music_name);
+        rt_kprintf("[pjsbt] music saved %s %u\n", s_music_name, (unsigned int)expect);
+        return RT_TRUE;
+    }
+    return RT_FALSE;
 }
 
 static void accept_write(const uint8_t *value, uint16_t length, rt_bool_t respond)
 {
+    if (length > 0U && value[0] != '{')
+    {
+        if (!accept_music(value, length))
+        {
+            if (respond)
+            {
+                att_error(ATT_WRITE_REQ, HANDLE_VALUE, 0x0DU);
+            }
+            return;
+        }
+        if (respond)
+        {
+            uint8_t ok = 0x13U;
+            acl_send(&ok, 1U);
+        }
+        return;
+    }
+    if (respond)
+    {
+        uint8_t ok = 0x13U;
+        acl_send(&ok, 1U);
+    }
     if (length >= sizeof(s_json))
     {
         length = sizeof(s_json) - 1U;
     }
     memcpy(s_json, value, length);
     s_json[length] = '\0';
-    if (respond)
-    {
-        uint8_t ok = 0x13U;
-        acl_send(&ok, 1U);
-    }
     if (!token_matches((const char *)s_json) || !pocketjs_dashboard_pc_ingest((const char *)s_json))
     {
         rt_kprintf("[pjsbt] stats rejected\n");
@@ -715,6 +960,7 @@ static void on_event(const uint8_t *event, uint16_t length)
     {
         s_handle = 0xFFFFU;
         s_l2cap_len = 0U;
+        music_abort();
         rt_kprintf("[pjsbt] disconnect status %02x reason %02x\n", event[3], event[6]);
         (void)start_advertising();
         return;
@@ -854,7 +1100,7 @@ static void bt_task(void *parameter)
 
 void pocketjs_bt_start(void)
 {
-    rt_thread_t thread = rt_thread_create("pjsbt", bt_task, RT_NULL, 6144U, 20U, 10U);
+    rt_thread_t thread = rt_thread_create("pjsbt", bt_task, RT_NULL, 8192U, 20U, 10U);
 
     if (thread != RT_NULL)
     {

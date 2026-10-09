@@ -51,6 +51,7 @@ typedef struct
 static wifi_config_t s_config;
 static wifi_config_t s_pending;
 static struct rt_mutex s_lock;
+static struct rt_mutex s_auth_lock;
 static rt_bool_t s_started;
 static rt_bool_t s_pending_ready;
 static volatile rt_bool_t s_ap_active;
@@ -621,34 +622,46 @@ static int wifi_authorize(const char *head)
     char expected[8];
     rt_uint8_t difference = 0U;
     rt_size_t i;
+    int result = 0;
+
+    if (rt_mutex_take(&s_auth_lock, RT_WAITING_FOREVER) != RT_EOK)
+    {
+        return 401;
+    }
 
     if (s_auth_failures >= WIFI_AUTH_MAX_FAILURES)
     {
-        if ((rt_tick_get() - s_auth_locked_until) > 0x7FFFFFFFU)
+        if ((rt_int32_t)(rt_tick_get() - s_auth_locked_until) < 0)
         {
-            return 429;
+            result = 429;
+            goto done;
         }
         s_auth_failures = 0U;
     }
     if (!pocketjs_game_token(expected))
     {
-        return 401;
+        result = 401;
+        goto done;
     }
     (void)wifi_header_value(head, "X-Token", supplied, sizeof(supplied));
-    for (i = 0U; i < 6U; ++i)
+    for (i = 0U; i < 7U; ++i)
     {
-        difference |= (rt_uint8_t)(supplied[i] ^ expected[i]);
+        difference |= (rt_uint8_t)((rt_uint8_t)supplied[i] ^ (rt_uint8_t)expected[i]);
     }
-    if (difference == 0U && supplied[6] == '\0')
+    if (difference == 0U)
     {
         s_auth_failures = 0U;
-        return 0;
+        goto done;
     }
     if (++s_auth_failures >= WIFI_AUTH_MAX_FAILURES)
     {
         s_auth_locked_until = rt_tick_get() + rt_tick_from_millisecond(WIFI_AUTH_LOCKOUT_MS);
     }
-    return 401;
+    result = 401;
+
+done:
+    rt_mutex_release(&s_auth_lock);
+    return result;
 }
 
 static void wifi_api_reject(int fd, int code)
@@ -722,7 +735,8 @@ static void wifi_api_get_song(int fd)
 /*
  * PUT /api/song: stream the JSON body straight into flash so a 96 KB chart never
  * needs a RAM copy. The song only replaces the old one after the whole body
- * arrived and looks like a JSON object.
+ * arrived. The staged file is validated before it atomically replaces the old
+ * song, so a malformed upload cannot destroy a known-good chart.
  */
 static void wifi_api_put_song(int fd, const char *head, const char *body_start, int body_have)
 {
@@ -731,8 +745,6 @@ static void wifi_api_put_song(int fd, const char *head, const char *body_start, 
     size_t expected;
     size_t remaining;
     size_t stored = 0U;
-    char first = '\0';
-    char last = '\0';
     rt_tick_t started = rt_tick_get_millisecond();
     int file;
     int received = body_have;
@@ -764,7 +776,6 @@ static void wifi_api_put_song(int fd, const char *head, const char *body_start, 
     while (remaining != 0U)
     {
         size_t take;
-        size_t i;
 
         if (received <= 0)
         {
@@ -779,18 +790,6 @@ static void wifi_api_put_song(int fd, const char *head, const char *body_start, 
             source = chunk;
         }
         take = (size_t)received < remaining ? (size_t)received : remaining;
-        for (i = 0U; i < take; ++i)
-        {
-            char c = source[i];
-            if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
-            {
-                if (first == '\0')
-                {
-                    first = c;
-                }
-                last = c;
-            }
-        }
         if (write(file, source, take) != (int)take)
         {
             pocketjs_game_custom_abort(file);
@@ -801,14 +800,26 @@ static void wifi_api_put_song(int fd, const char *head, const char *body_start, 
         remaining -= take;
         received = 0;
     }
-    if (first != '{' || last != '}' || !pocketjs_game_custom_commit(file, stored))
     {
-        if (first != '{' || last != '}')
+        char *json = pocketjs_game_custom_staged_read(file, &expected);
+        bool valid = json != RT_NULL && expected == stored &&
+                     pocketjs_dashboard_validate_song_json(json, expected);
+
+        if (json != RT_NULL)
+        {
+            rt_free(json);
+        }
+        if (!valid)
         {
             pocketjs_game_custom_abort(file);
+            wifi_send_json(fd, "400 Bad Request", "{\"ok\":false,\"error\":\"invalid song schema\"}");
+            return;
         }
-        wifi_send_json(fd, "400 Bad Request", "{\"ok\":false,\"error\":\"not a song object\"}");
-        return;
+        if (!pocketjs_game_custom_commit(file, stored))
+        {
+            wifi_send_json(fd, "507 Insufficient Storage", "{\"ok\":false,\"error\":\"song commit failed\"}");
+            return;
+        }
     }
     rt_snprintf(chunk, sizeof(chunk), "{\"ok\":true,\"size\":%u}", (unsigned int)stored);
     wifi_send_json(fd, "200 OK", chunk);
@@ -877,14 +888,32 @@ static void wifi_serve_api(int fd, const char *request, const char *body, int bo
     }
     else if (rt_strncmp(request, "GET /api/scores ", 16) == 0)
     {
+        denied = wifi_authorize(request);
+        if (denied != 0)
+        {
+            wifi_api_reject(fd, denied);
+            return;
+        }
         wifi_api_scores(fd);
     }
     else if (rt_strncmp(request, "GET /api/song ", 14) == 0)
     {
+        denied = wifi_authorize(request);
+        if (denied != 0)
+        {
+            wifi_api_reject(fd, denied);
+            return;
+        }
         wifi_api_get_song(fd);
     }
     else if (rt_strncmp(request, "GET /api/pc ", 12) == 0)
     {
+        denied = wifi_authorize(request);
+        if (denied != 0)
+        {
+            wifi_api_reject(fd, denied);
+            return;
+        }
         wifi_api_get_pc(fd);
     }
     else if (rt_strncmp(request, "PUT /api/pc ", 12) == 0)
@@ -1238,6 +1267,7 @@ void pocketjs_wifi_start(void)
     rt_snprintf(s_ap_ssid, sizeof(s_ap_ssid), "EdgiTalk-%06X", id & 0xFFFFFFU);
     rt_snprintf(s_ap_password, sizeof(s_ap_password), "Edgi%08X", id);
     if (rt_mutex_init(&s_lock, "pjswifi", RT_IPC_FLAG_PRIO) != RT_EOK) return;
+    if (rt_mutex_init(&s_auth_lock, "pjsauth", RT_IPC_FLAG_PRIO) != RT_EOK) return;
     manager = rt_thread_create("pjswifi", wifi_manager_task, RT_NULL,
                                WIFI_MANAGER_STACK, WIFI_THREAD_PRIORITY, 10U);
     http = rt_thread_create("pjshttp", wifi_http_task, RT_NULL,

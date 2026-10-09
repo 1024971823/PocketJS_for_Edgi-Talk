@@ -19,7 +19,7 @@ globalThis.__edgi = {
   status: function () {
     var wifi = globalThis.__wifi !== false;
     return {
-      cpu: 23, ram: 41, fps: 29, temp: 265, tempSource: 1,
+      cpu: 23, ram: 41, fps: 29, flash: 18, temp: 265, tempSource: 1,
       wifi: wifi, ssid: "Srakoul-5G", ip: wifi ? "192.168.1.23" : "", token: "483920",
       ap: !wifi, apSsid: "EdgiTalk-A1B2C3", apPassword: "Edgi5F3A9C21",
       weather: "CLEAR", weatherTemp: 246, month: 9, day: 29,

@@ -9,13 +9,19 @@
 #   export POCKETJS_ROOT=/path/to/pocketjs
 #   export POCKETJS_NATIVE_HOST_LOOP=0          # keep overlay pocketjs_app.c for now
 #   export POCKETJS_NATIVE_PACKAGE_STUB=0       # use applications/pocketjs/generated/
-#   export POCKETJS_QUICKJS_ROOT=/path/to/quickjs-ng   # optional
+#   export QUICKJS_ROOT=/path/to/quickjs-ng            # optional
 
 import os
 from building import *
 
 cwd = GetCurrentDir()
+project_root = os.path.abspath(cwd + '/../..')
+work_root = os.path.abspath(project_root + '/../../..')
 pocketjs_root = os.environ.get('POCKETJS_ROOT')
+repo_root = os.path.abspath(pocketjs_root or (work_root + '/pocketjs'))
+quickjs_root = os.path.abspath(os.environ.get(
+    'QUICKJS_ROOT',
+    os.environ.get('POCKETJS_QUICKJS_ROOT', work_root + '/quickjs-ng')))
 native_sc = None
 if pocketjs_root:
     candidate = os.path.join(pocketjs_root, 'hosts/rt-thread-edgitalk/native/SConscript')
@@ -59,15 +65,16 @@ if native_sc:
     Return('host_group', 'quickjs_group', 'product_group')
 
 # ---- Fallback: full in-tree build (no POCKETJS_ROOT) ----
-repo_root = os.path.abspath(cwd + '/../../../../../pocketjs')
-quickjs_root = os.environ.get(
-    'POCKETJS_QUICKJS_ROOT',
-    os.path.abspath(cwd + '/../../../../../quickjs-ng'))
+for label, dependency in [('PocketJS', repo_root), ('QuickJS-ng', quickjs_root)]:
+    if not os.path.isdir(dependency):
+        raise RuntimeError('%s root not found: %s (set the corresponding environment variable)' %
+                           (label, dependency))
 
 idf_root = repo_root + '/hosts/esp-idf/components'
 rust_lib_dir = repo_root + '/hosts/esp-idf/native/ui-core/target/thumbv8m.main-none-eabihf/release'
 renderer_rust_lib_dir = repo_root + '/hosts/esp-idf/native/render-rgb565/target/thumbv8m.main-none-eabihf/release'
 smoke_package = repo_root + '/apps/edgitalk-m55-smoke/dist/edgitalk-m55-smoke.pocket'
+# CYW55513 module on this kit: bsp.mk component wlbga_iPA_sLNA_ANT0_LHL_XTAL_IN.
 
 host_src = [
     cwd + '/pocketjs_app.c',
@@ -118,7 +125,12 @@ host_group = DefineGroup(
     LIBS=['pocketjs_idf_render_rgb565', 'pocketjs_idf_ui_core'],
 )
 
+# The assembler's .incbin payload is invisible to SCons' dependency scanner.
+# Reassemble this tiny wrapper on every build so it always contains the current
+# .pocket container rather than a stale package object.
 AlwaysBuild(cwd + '/generated/pocketjs_package_edgitalk_smoke_blob.o')
+
+# Keep the package itself visible in the project dependency graph as well.
 Depends(host_group, smoke_package)
 
 quickjs_group = DefineGroup(

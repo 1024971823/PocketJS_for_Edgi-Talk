@@ -22,6 +22,9 @@ bool pocketjs_dashboard_set_time(int64_t unix_utc, int tz_minutes, bool from_pc)
 bool pocketjs_dashboard_pc_ingest(const char *json);
 /* GET /api/pc body, including the age of the last update. Returns the length written. */
 size_t pocketjs_dashboard_pc_json(char *out, size_t capacity);
+
+/* Validate a custom chart against the same schema used by the game bridge and companion. */
+bool pocketjs_dashboard_validate_song_json(const char *json, size_t length);
 esp_err_t pocketjs_dashboard_install(JSContext *context, void *user_data);
 
 #ifdef __cplusplus

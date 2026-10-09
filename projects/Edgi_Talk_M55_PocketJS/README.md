@@ -17,9 +17,10 @@ Edgi-Talk 的 M55 固件。PocketJS 画一个 400×240 的界面，放大到 800
 | 路径 | 内容 |
 | --- | --- |
 | 本目录 | RT-Thread 工程、`applications/pocketjs/`、上位机、预览和测量脚本 |
-| `b/work/pocketjs/apps/edgitalk-m55-smoke/` | 界面和游戏的 TypeScript，打包后嵌进固件 |
-| `b/work/quickjs-ng/` | QuickJS |
-| `b/work/build-edgi-talk.sh`、`flash-xiaozhi-daplink.sh` | 编译和烧录 |
+| `WORK_ROOT/pocketjs/apps/edgitalk-m55-smoke/` | 界面和游戏的 TypeScript，打包后嵌进固件 |
+| `WORK_ROOT/pocketjs/` | PocketJS 运行时、组件和 Rust 静态库 |
+| `WORK_ROOT/quickjs-ng/` | QuickJS |
+| `tools/` | 可复现的编译、烧录、测试和路径检查脚本 |
 
 ## 板上，最短的一条路
 
@@ -44,14 +45,8 @@ python3 edgitalk.py push chart.json        # 选歌页的 PC 卡
 ## 改完再烧
 
 ```sh
-cd /home/Srakoul/Documents/Codex/2026-09-27/b/work/pocketjs
-~/.bun/bin/bun tools/pocket.ts build \
-  --host-profile apps/edgitalk-m55-smoke/pocket.host.json \
-  --manifest apps/edgitalk-m55-smoke/pocket.json
-
-cd /home/Srakoul/Documents/Codex/2026-09-27/b/work
-./build-edgi-talk.sh Edgi_Talk_M55_PocketJS -j8
-M55_PROJECT=Edgi_Talk_M55_PocketJS ./flash-xiaozhi-daplink.sh m55
+tools/build.sh -j8
+tools/flash.sh m55
 ```
 
-`m55` 只写 M55，不动 M33。不设 `M55_PROJECT` 会烧成另一个工程。只改了 C、没改界面时，可以跳过第一条。步骤说明见 [编译与烧录](docs/编译与烧录.md)。
+`build.sh` 会打 `.pocket`、生成无绝对路径的嵌入汇编并编固件；`flash.sh m55` 只写 M55，不动 M33。只改 C 时可以用 `tools/build.sh --no-ui -j8`。步骤、依赖变量和构建输入锁见 [编译与烧录](docs/编译与烧录.md)。

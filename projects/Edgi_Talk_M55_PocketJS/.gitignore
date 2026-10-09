@@ -1,0 +1,19 @@
+# Firmware and SCons outputs
+*.o
+*.obj
+*.a
+*.elf
+*.hex
+*.map
+*.dblite
+*.dep
+*.d
+build/
+Debug/
+__pycache__/
+*.py[cod]
+
+# Local editor and test output
+.DS_Store
+*.log
+/preview-out/

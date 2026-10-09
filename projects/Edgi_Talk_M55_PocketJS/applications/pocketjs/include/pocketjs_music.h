@@ -16,6 +16,8 @@ typedef struct
 rt_err_t pocketjs_music_start(void);
 bool pocketjs_music_command(int command);
 void pocketjs_music_status(pocketjs_music_status_t *status);
+/* Rescan and show this title (the wav name without ".wav") on the home bar. */
+void pocketjs_music_focus(const char *name);
 
 /*
  * The game synthesizer shares the sound0 device with the music player.

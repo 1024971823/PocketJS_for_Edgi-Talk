@@ -158,14 +158,12 @@ def ensure_link(mac: str) -> None:
         raise _connect_error(error) from None
 
 
-def write_stats(mac: str, payload: dict[str, Any]) -> None:
-    """Connect if needed and write one stats JSON object."""
+def _ensure_char(mac: str) -> None:
+    """Connect if needed and resolve the writable characteristic."""
     global _char_proxy, _char_mac
     if not adapter_present():
         raise edgitalk.CompanionError("这台电脑没有蓝牙")
-    Gio, GLib = _gi()
     path = _device_path(mac)
-    device = _proxy(path, "org.bluez.Device1")
     try:
         connected = bool(_property(path, "org.bluez.Device1", "Connected"))
     except Exception:
@@ -178,7 +176,6 @@ def write_stats(mac: str, payload: dict[str, Any]) -> None:
         except Exception as error:
             raise _connect_error(error) from None
         _char_proxy = None
-    # Service discovery runs after the link is up, so wait for it every time.
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         try:
@@ -190,16 +187,64 @@ def write_stats(mac: str, payload: dict[str, Any]) -> None:
     if _char_proxy is None or _char_mac != mac:
         _char_proxy = _characteristic(mac)
         _char_mac = mac
-    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    options = {"type": GLib.Variant("s", "request")}
+
+
+def write_stats(mac: str, payload: dict[str, Any]) -> None:
+    """Connect if needed and write one stats JSON object."""
+    _ensure_char(mac)
+    _write_bytes(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+
+def _write_bytes(body: bytes, kind: str = "request") -> None:
+    global _char_proxy
+    Gio, GLib = _gi()
+    options = {"type": GLib.Variant("s", kind)}
     try:
         _char_proxy.call_sync(
             "WriteValue",
             GLib.Variant("(aya{sv})", (body, options)),
             Gio.DBusCallFlags.NONE,
-            8000,
+            20000,
             None,
         )
     except Exception as error:
         _char_proxy = None
         raise edgitalk.CompanionError(f"蓝牙发送失败：{error}") from None
+
+
+def push_music(mac: str, wav: bytes, token: str, title: str, progress=None) -> None:
+    """Send one home-player file. The board keeps it only after the final 'E'."""
+    import struct
+
+    def report(sent: int) -> None:
+        if progress is not None:
+            progress(sent, len(wav))
+
+    _ensure_char(mac)
+    if len(wav) < 44 or len(wav) > edgitalk.PLAYER_WAV_LIMIT:
+        raise edgitalk.CompanionError(
+            f"player file must be 44..{edgitalk.PLAYER_WAV_LIMIT} bytes"
+        )
+    code = token.strip().encode("ascii")
+    name = title.strip().encode("ascii")
+    if len(code) != 6:
+        raise edgitalk.CompanionError("配对码要是六位数字")
+    if not name or len(name) > 16:
+        raise edgitalk.CompanionError("歌名要用 1 到 16 个英文字")
+    report(0)
+    _write_bytes(b"M" + code + struct.pack("<IB", len(wav), len(name)) + name)
+    step = 160
+    offset = 0
+    while offset < len(wav):
+        piece = wav[offset:offset + step]
+        try:
+            # One acknowledged write at a time. A burst overruns the 115200 UART.
+            _write_bytes(b"D" + piece, "request")
+        except edgitalk.CompanionError:
+            if step == 18 or offset != 0:
+                raise
+            step = 18
+            continue
+        offset += len(piece)
+        report(offset)
+    _write_bytes(b"E")

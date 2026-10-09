@@ -25,7 +25,6 @@
     #include "cy_usb_dev.h"
     #include "cy_usb_dev_hid.h"
 #endif
-
 /*SRAM CONFIG*/
 #define IFX_SRAM_SIZE                   (1408)
 #define IFX_SRAM_END                    (0x26060000 + IFX_SRAM_SIZE * 1024)
@@ -47,4 +46,3 @@
 void cy_bsp_all_init(void);
 
 #endif
-

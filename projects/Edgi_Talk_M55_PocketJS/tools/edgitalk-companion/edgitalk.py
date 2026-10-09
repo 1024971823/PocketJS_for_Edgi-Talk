@@ -28,7 +28,9 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -37,7 +39,11 @@ from typing import Any
 DISCOVERY_PORT = 47808
 HTTP_PORT = 80
 SONG_LIMIT = 96 * 1024
+# /flash is 1 MB with 64 KB blocks. Leave room for the filesystem itself.
+PLAYER_WAV_LIMIT = 380 * 1024
 MAX_EVENTS = 2000
+MAX_NOTES = 2000
+MAX_CHART_STEPS = 65535
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".edgitalk.json")
 
 VOICE_LEAD, VOICE_BASS, VOICE_DRUM = 0, 1, 2
@@ -178,20 +184,20 @@ class Board:
         return json.loads(self._request("GET", "/api/status"))
 
     def scores(self) -> dict[str, Any]:
-        return json.loads(self._request("GET", "/api/scores"))
+        return json.loads(self._request("GET", "/api/scores", auth=True))
 
     def push(self, payload: bytes) -> dict[str, Any]:
         return json.loads(self._request("PUT", "/api/song", payload, auth=True))
 
     def pull(self) -> bytes:
-        return self._request("GET", "/api/song")
+        return self._request("GET", "/api/song", auth=True)
 
     def push_stats(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         return json.loads(self._request("PUT", "/api/pc", body, auth=True))
 
     def pc(self) -> dict[str, Any]:
-        return json.loads(self._request("GET", "/api/pc"))
+        return json.loads(self._request("GET", "/api/pc", auth=True))
 
     def clear(self) -> dict[str, Any]:
         return json.loads(self._request("DELETE", "/api/song", auth=True))
@@ -200,42 +206,75 @@ class Board:
 # -- chart format -----------------------------------------------------------------
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def validate_chart(chart: Any) -> list[str]:
-    """Mirror of parseCustomSong() on the device; returns a list of problems."""
+    """Validate the same custom-song contract enforced by the firmware."""
     problems: list[str] = []
     if not isinstance(chart, dict):
         return ["chart must be a JSON object"]
+
     bpm = chart.get("bpm")
-    if not isinstance(bpm, (int, float)) or isinstance(bpm, bool) or not 60 <= bpm <= 240:
-        problems.append("bpm must be a number between 60 and 240")
+    if not _is_int(bpm) or not 60 <= bpm <= 240:
+        problems.append("bpm must be an integer between 60 and 240")
+
+    if "title" in chart and (not isinstance(chart["title"], str) or len(chart["title"]) > 64):
+        problems.append("title must be a string of at most 64 characters")
+    if "level" in chart and (not _is_int(chart["level"]) or not 1 <= chart["level"] <= 3):
+        problems.append("level must be an integer 1..3")
+    if "steps" in chart and (not _is_int(chart["steps"]) or not 1 <= chart["steps"] <= MAX_CHART_STEPS):
+        problems.append("steps must be an integer 1..65535")
+
     notes = chart.get("notes")
-    events = chart.get("events")
-    if not isinstance(notes, list) or len(notes) < 2 or len(notes) % 2:
-        problems.append("notes must be a flat [step, type, ...] list with at least one note")
+    if (not isinstance(notes, list) or len(notes) < 2 or len(notes) % 2 or
+            len(notes) // 2 > MAX_NOTES):
+        problems.append(
+            f"notes must contain 1..{MAX_NOTES} [step, type] pairs"
+        )
     else:
+        previous_step = -1
         for index in range(0, len(notes), 2):
-            step, kind = notes[index], notes[index + 1]
-            if not isinstance(step, int) or not 0 <= step <= 65535:
+            step, kind = notes[index:index + 2]
+            if not _is_int(step) or not 0 <= step <= MAX_CHART_STEPS:
                 problems.append(f"notes[{index}]: step must be an integer 0..65535")
                 break
-            if kind not in (0, 1, 2, 3):
+            if step < previous_step:
+                problems.append(f"notes[{index}]: steps must be nondecreasing")
+                break
+            previous_step = step
+            if not _is_int(kind) or kind not in (0, 1, 2, 3):
                 problems.append(f"notes[{index + 1}]: type must be 0..3")
                 break
-    if not isinstance(events, list) or len(events) % 5:
-        problems.append("events must be a flat [step, voice, note, length, volume, ...] list")
+
+    events = chart.get("events")
+    if (not isinstance(events, list) or not events or len(events) % 5 or
+            len(events) // 5 > MAX_EVENTS):
+        problems.append(
+            f"events must contain 1..{MAX_EVENTS} [step, voice, note, length, volume] records"
+        )
     else:
-        if len(events) // 5 > MAX_EVENTS:
-            problems.append(f"at most {MAX_EVENTS} events are supported")
         for index in range(0, len(events), 5):
             step, voice, note, length, volume = events[index:index + 5]
-            if not all(isinstance(v, int) for v in (step, voice, note, length, volume)):
+            if not all(_is_int(value) for value in (step, voice, note, length, volume)):
                 problems.append(f"events[{index}]: all fields must be integers")
                 break
-            if voice not in (0, 1, 2) or not 0 <= step <= 65535:
-                problems.append(f"events[{index}]: bad step/voice")
+            if not 0 <= step <= MAX_CHART_STEPS:
+                problems.append(f"events[{index}]: step must be 0..65535")
                 break
-            if (note > 2 if voice == 2 else not 12 <= note <= 108):
+            if voice not in (0, 1, 2):
+                problems.append(f"events[{index + 1}]: voice must be 0..2")
+                break
+            note_valid = 0 <= note <= 2 if voice == 2 else 12 <= note <= 108
+            if not note_valid:
                 problems.append(f"events[{index + 2}]: note out of range")
+                break
+            if not 1 <= length <= 255:
+                problems.append(f"events[{index + 3}]: length must be 1..255")
+                break
+            if not 0 <= volume <= 127:
+                problems.append(f"events[{index + 4}]: volume must be 0..127")
                 break
     return problems
 
@@ -523,6 +562,89 @@ def _load_chart(path: str) -> dict[str, Any]:
     return chart
 
 
+def player_title(text: str) -> str:
+    """ASCII title the home bar can draw, at most 16 characters."""
+    cleaned = "".join(ch if ch.isalnum() or ch in " -_" else "" for ch in text).strip()
+    return (cleaned or "Track")[:16]
+
+
+def is_player_wav(data: bytes) -> bool:
+    """True for mono 16-bit PCM at a rate the board already plays."""
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return False
+    offset = 12
+    fmt = None
+    while offset + 8 <= len(data):
+        kind = data[offset:offset + 4]
+        size = struct.unpack_from("<I", data, offset + 4)[0]
+        start = offset + 8
+        if start + size > len(data):
+            return False
+        if kind == b"fmt " and size >= 16:
+            fmt = data[start:start + 16]
+        elif kind == b"data":
+            break
+        offset = start + size + (size & 1)
+    if fmt is None:
+        return False
+    audio_format, channels = struct.unpack_from("<HH", fmt, 0)
+    rate = struct.unpack_from("<I", fmt, 4)[0]
+    bits = struct.unpack_from("<H", fmt, 14)[0]
+    return audio_format == 1 and channels == 1 and bits == 16 and rate in (16000, 24000, 48000, 96000)
+
+
+def prepare_player_wav(raw: bytes, filename: str, title: str = "") -> tuple[bytes, str]:
+    """Return a small mono MP3 the home player can store, plus a short ASCII title.
+
+    /flash is 1 MB. A 16 kHz WAV of a normal song does not fit, so the file is
+    packed down until it does.
+    """
+    name = player_title(title or os.path.splitext(os.path.basename(filename or "Track"))[0])
+    packed = _ffmpeg_player_mp3(raw, filename)
+    if len(packed) > PLAYER_WAV_LIMIT:
+        raise CompanionError("板子的 flash 只有 1MB，这首压完还是放不下。")
+    return packed, name
+
+
+def _ffmpeg_player_mp3(raw: bytes, filename: str) -> bytes:
+    suffix = os.path.splitext(filename or "")[1] or ".audio"
+    src = ""
+    best = b""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(raw)
+            src = handle.name
+        for bitrate in ("16k", "12k", "8k"):
+            dst = src + ".mp3"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "16000",
+                     "-codec:a", "libmp3lame", "-b:a", bitrate, "-f", "mp3", dst],
+                    check=True, capture_output=True,
+                )
+            except FileNotFoundError:
+                raise CompanionError("这台电脑没有 ffmpeg，转不了这首歌。") from None
+            except subprocess.CalledProcessError as error:
+                detail = (error.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                tail = detail[-1] if detail else "ffmpeg 失败"
+                raise CompanionError(f"转不成播放器能放的文件：{tail}") from None
+            with open(dst, "rb") as handle:
+                best = handle.read()
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
+            if len(best) <= PLAYER_WAV_LIMIT:
+                return best
+    finally:
+        if src:
+            try:
+                os.unlink(src)
+            except OSError:
+                pass
+    return best
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     chart = _load_chart(args.chart)
     payload = encode_chart(chart)
@@ -533,6 +655,28 @@ def cmd_push(args: argparse.Namespace) -> int:
     print(f"uploaded {result.get('size', len(payload))} bytes: {chart.get('title', 'Custom')} "
           f"({chart['bpm']} BPM, {len(chart['notes']) // 2} notes)")
     print('On the board: SONGS -> the teal "PC" card.')
+    return 0
+
+
+def cmd_music(args: argparse.Namespace) -> int:
+    """Send an audio file to the home player over Bluetooth."""
+    import ble
+
+    try:
+        with open(args.file, "rb") as handle:
+            raw = handle.read()
+    except OSError as error:
+        raise CompanionError(f"cannot read {args.file}: {error}") from None
+    config = load_config()
+    token = args.token or os.environ.get("EDGITALK_TOKEN") or config.get("token", "")
+    wav, title = prepare_player_wav(raw, args.file, args.title or "")
+    if len(wav) > PLAYER_WAV_LIMIT:
+        raise CompanionError(f"player file is {len(wav)} bytes; limit is {PLAYER_WAV_LIMIT}")
+    mac = ble.find_edgitalk()
+    if not mac:
+        raise CompanionError("EdgiTalk is not advertising")
+    ble.push_music(mac, wav, str(token), title)
+    print(f"sent {len(wav)} bytes to the home player as {title}")
     return 0
 
 
@@ -603,7 +747,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
 def cmd_console(args: argparse.Namespace) -> int:
     import console
 
-    return console.run_console(host=args.host or "", token=args.token or "", port=args.port)
+    return console.run_console(
+        host=args.host or "", token=args.token or "", port=args.port,
+        open_browser=not args.no_browser, listen_port=args.listen)
 
 
 # -- mock board ---------------------------------------------------------------------
@@ -646,6 +792,8 @@ def run_mock(host: str = "127.0.0.1", port: int = 8080, udp_port: int = DISCOVER
                 self._json(200, {"device": "edgi-talk", "app": "beat-dash", "api": 1, "name": "EdgiTalk-MOCK",
                                  "ip": host, "ap": False, "playing": state["playing"],
                                  "song": {"present": song is not None, "size": len(song or b""), "limit": SONG_LIMIT}})
+            elif self.path in ("/api/scores", "/api/pc", "/api/song") and not self._auth():
+                return
             elif self.path == "/api/scores":
                 self._json(200, {"best": [0, 12840, 76749, 0, 0, 0, 0, 0], "rank": "-AS-----"})
             elif self.path == "/api/pc":
@@ -676,7 +824,7 @@ def run_mock(host: str = "127.0.0.1", port: int = 8080, udp_port: int = DISCOVER
                     data = json.loads(self.rfile.read(length))
                 except ValueError:
                     return self._json(400, {"ok": False, "error": "no cpu value"})
-                if not isinstance(data, dict) or not isinstance(data.get("cpu"), int):
+                if not isinstance(data, dict) or not _is_int(data.get("cpu")):
                     return self._json(400, {"ok": False, "error": "no cpu value"})
                 state["pc"] = data
                 state["pc_time"] = time.monotonic()
@@ -691,8 +839,14 @@ def run_mock(host: str = "127.0.0.1", port: int = 8080, udp_port: int = DISCOVER
             if state["playing"]:
                 return self._json(409, {"ok": False, "error": "game is running"})
             body = self.rfile.read(length).strip()
-            if not (body.startswith(b"{") and body.endswith(b"}")):
+            try:
+                chart = json.loads(body)
+            except ValueError:
                 return self._json(400, {"ok": False, "error": "not a song object"})
+            problems = validate_chart(chart)
+            if problems:
+                return self._json(400, {"ok": False, "error": problems[0]})
+            body = json.dumps(chart, separators=(",", ":")).encode("utf-8")
             state["song"] = body
             self._json(200, {"ok": True, "size": length})
 
@@ -753,6 +907,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("chart")
     p.set_defaults(func=cmd_push)
 
+    p = sub.add_parser("music", help="send an audio file to the home player over Bluetooth")
+    p.add_argument("file")
+    p.add_argument("--title", default="", help="name shown on the home bar (ASCII, 16 chars)")
+    p.set_defaults(func=cmd_music)
+
     p = sub.add_parser("pull", help="download the stored custom song")
     p.add_argument("output", nargs="?")
     p.set_defaults(func=cmd_pull)
@@ -783,8 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-time", action="store_true", help="do not send the PC clock")
     p.set_defaults(func=cmd_stats)
 
-    sub.add_parser("console", help="open the console in a browser").set_defaults(func=cmd_console)
-    sub.add_parser("gui", help="same as console").set_defaults(func=cmd_console)
+    page = argparse.ArgumentParser(add_help=False)
+    page.add_argument("--listen", type=int, default=0, help="local page port (default: a free port)")
+    page.add_argument("--no-browser", action="store_true", help="do not open a browser window")
+    sub.add_parser("console", parents=[page], help="open the console in a browser").set_defaults(func=cmd_console)
+    sub.add_parser("gui", parents=[page], help="same as console").set_defaults(func=cmd_console)
     sub.add_parser("mock", help="run a fake board for testing").set_defaults(func=cmd_mock)
     return parser
 

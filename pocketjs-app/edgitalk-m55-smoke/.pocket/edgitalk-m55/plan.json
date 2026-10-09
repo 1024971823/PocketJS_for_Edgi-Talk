@@ -58,10 +58,10 @@
     "kind": "esp-idf",
     "version": 1,
     "payload": {
-      "profileHash": "sha256:9970a620f3597b8ae2fe55beddd0ef35a7299dbdc28f1834c512f1afc470ddc3",
-      "tickHz": 30
+      "profileHash": "sha256:eb52df1d400de2b669f694a4258d39ffc683456be10fd32d052b38bdebec0016",
+      "tickHz": 60
     },
-    "payloadHash": "sha256:a5558c5d6c833b0012d27b7d481e47e6d2d2ea9a0b09b8535bac946fc94bc082"
+    "payloadHash": "sha256:169cc5d1d5aeab4fb71054c4f9759a44ebee9df78aa5b746c5d76407d54a23c8"
   },
-  "planHash": "sha256:4307d550ef0f727457b6b13145ca3f625c8e8335b6166576552851cd5f68cfaa"
+  "planHash": "sha256:70c1d56e4b33af96851d6a09c91a2816ebf541f7ca9db51f3c09b437da831fe1"
 }

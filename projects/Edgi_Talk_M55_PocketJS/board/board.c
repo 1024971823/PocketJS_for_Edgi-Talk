@@ -28,7 +28,7 @@ void cy_bsp_all_init(void)
     {
         CY_ASSERT(0);
     }
-    
+
 }
 
 void _start(void)

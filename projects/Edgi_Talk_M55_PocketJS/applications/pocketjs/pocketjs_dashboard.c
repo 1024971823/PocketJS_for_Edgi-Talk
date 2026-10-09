@@ -16,6 +16,7 @@
 #include <socket/sys_socket/sys/socket.h>
 #include <socket/netinet/in.h>
 #include <string.h>
+#include <sys/statfs.h>
 #include <time.h>
 
 #define DASHBOARD_UNKNOWN_TEMP       (-9999)
@@ -74,6 +75,8 @@ static volatile rt_uint8_t s_cpu_percent;
 static rt_tick_t s_fps_started_at;
 static uint32_t s_fps_presented;
 static volatile rt_uint8_t s_fps;
+static int s_flash_percent;
+static rt_tick_t s_flash_checked;
 
 static rt_bool_t dashboard_i2c_write(struct rt_i2c_bus_device *bus,
                                       rt_uint16_t address, rt_uint8_t *data,
@@ -881,6 +884,36 @@ static JSValue dashboard_pc(JSContext *context, JSValueConst this_value, int arg
     return object;
 }
 
+/* Percent of /flash that is already used. Cached so the home ring does not
+ * hit the filesystem on every frame. */
+static int dashboard_flash_percent(void)
+{
+    rt_tick_t now = rt_tick_get();
+    struct statfs info;
+
+    if (s_flash_checked != 0U &&
+        (rt_tick_t)(now - s_flash_checked) < rt_tick_from_millisecond(2000U))
+    {
+        return s_flash_percent;
+    }
+    s_flash_checked = now;
+    if (statfs("/flash", &info) != 0 || info.f_blocks == 0U || info.f_bfree > info.f_blocks)
+    {
+        s_flash_percent = 0;
+        return 0;
+    }
+    s_flash_percent = (int)(((uint64_t)(info.f_blocks - info.f_bfree) * 100U) / info.f_blocks);
+    if (s_flash_percent < 0)
+    {
+        s_flash_percent = 0;
+    }
+    else if (s_flash_percent > 100)
+    {
+        s_flash_percent = 100;
+    }
+    return s_flash_percent;
+}
+
 static JSValue dashboard_status(JSContext *context, JSValueConst this_value,
                                 int argc, JSValueConst *argv)
 {
@@ -906,6 +939,7 @@ static JSValue dashboard_status(JSContext *context, JSValueConst this_value,
                       JS_NewInt32(context, total == 0U ? 0 :
                                   (int)((used * 100U + total / 2U) / total)));
     JS_SetPropertyStr(context, object, "fps", JS_NewInt32(context, s_fps));
+    JS_SetPropertyStr(context, object, "flash", JS_NewInt32(context, dashboard_flash_percent()));
     JS_SetPropertyStr(context, object, "temp",
                       JS_NewInt32(context, s_board_temp_tenths));
     JS_SetPropertyStr(context, object, "tempSource",
@@ -976,6 +1010,258 @@ static int32_t dashboard_int_arg(JSContext *context, JSValueConst value, int32_t
     return JS_ToInt32(context, &number, value) < 0 ? fallback : number;
 }
 
+static bool dashboard_json_integer(JSContext *context, JSValueConst value,
+                                  int32_t minimum, int32_t maximum, int32_t *result)
+{
+    double number;
+    int64_t integer;
+
+    if (!JS_IsNumber(value) || JS_ToFloat64(context, &number, value) < 0 ||
+        number < (double)minimum || number > (double)maximum ||
+        number != (double)(int64_t)number)
+    {
+        return false;
+    }
+    if (JS_ToInt64(context, &integer, value) < 0)
+    {
+        return false;
+    }
+    *result = (int32_t)integer;
+    return true;
+}
+
+static bool dashboard_array_length(JSContext *context, JSValueConst value, uint32_t *length)
+{
+    JSValue length_value;
+    bool valid;
+
+    if (!JS_IsArray(value))
+    {
+        return false;
+    }
+    length_value = JS_GetPropertyStr(context, value, "length");
+    valid = JS_IsNumber(length_value) && JS_ToUint32(context, length, length_value) == 0;
+    JS_FreeValue(context, length_value);
+    return valid;
+}
+
+static bool dashboard_validate_event_array(JSContext *context, JSValueConst value,
+                                          uint32_t length, uint32_t count)
+{
+    uint32_t i;
+
+    if (length != count * 5U || count == 0U || count > POCKETJS_GAME_MAX_EVENTS)
+    {
+        return false;
+    }
+    for (i = 0U; i < count; ++i)
+    {
+        int32_t field[5];
+        uint32_t k;
+
+        for (k = 0U; k < 5U; ++k)
+        {
+            JSValue item = JS_GetPropertyUint32(context, value, i * 5U + k);
+            int32_t minimum = 0;
+            int32_t maximum = 127;
+            bool valid;
+
+            if (k == 0U)
+            {
+                maximum = 65535;
+            }
+            else if (k == 1U)
+            {
+                maximum = 2;
+            }
+            else if (k == 2U)
+            {
+                minimum = field[1] == 2 ? 0 : 12;
+                maximum = field[1] == 2 ? 2 : 108;
+            }
+            else if (k == 3U)
+            {
+                minimum = 1;
+                maximum = 255;
+            }
+            valid = dashboard_json_integer(context, item, minimum, maximum, &field[k]);
+            if (!valid)
+            {
+                JS_FreeValue(context, item);
+                return false;
+            }
+            JS_FreeValue(context, item);
+        }
+    }
+    return true;
+}
+
+static bool dashboard_validate_title(JSContext *context, JSValueConst value)
+{
+    const uint16_t *text;
+    size_t units = 0U;
+    size_t characters = 0U;
+    size_t i;
+    bool valid;
+
+    if (!JS_IsString(value))
+    {
+        return false;
+    }
+    text = JS_ToCStringLenUTF16(context, &units, value);
+    if (text == RT_NULL)
+    {
+        return false;
+    }
+    for (i = 0U; i < units; ++i)
+    {
+        ++characters;
+        if (text[i] >= 0xD800U && text[i] <= 0xDBFFU && i + 1U < units &&
+            text[i + 1U] >= 0xDC00U && text[i + 1U] <= 0xDFFFU)
+        {
+            ++i;
+        }
+    }
+    valid = characters <= 64U;
+    JS_FreeCStringUTF16(context, text);
+    return valid;
+}
+
+static bool dashboard_validate_song_value(JSContext *context, JSValueConst song)
+{
+    JSValue value;
+    uint32_t length;
+    uint32_t i;
+    int32_t number;
+    int32_t previous_step;
+    bool valid;
+
+    if (!JS_IsObject(song) || JS_IsArray(song))
+    {
+        return false;
+    }
+    value = JS_GetPropertyStr(context, song, "bpm");
+    valid = dashboard_json_integer(context, value, 60, 240, &number);
+    JS_FreeValue(context, value);
+    if (!valid)
+    {
+        return false;
+    }
+
+    value = JS_GetPropertyStr(context, song, "notes");
+    if (!dashboard_array_length(context, value, &length) || length < 2U ||
+        (length & 1U) != 0U || length / 2U > POCKETJS_GAME_MAX_NOTES)
+    {
+        JS_FreeValue(context, value);
+        return false;
+    }
+    previous_step = -1;
+    for (i = 0U; i < length; i += 2U)
+    {
+        int32_t step;
+        int32_t kind;
+        JSValue step_value = JS_GetPropertyUint32(context, value, i);
+        JSValue kind_value = JS_GetPropertyUint32(context, value, i + 1U);
+        bool valid = dashboard_json_integer(context, step_value, 0, 65535, &step) &&
+                     step >= previous_step &&
+                     dashboard_json_integer(context, kind_value, 0, 3, &kind);
+        JS_FreeValue(context, step_value);
+        JS_FreeValue(context, kind_value);
+        if (!valid)
+        {
+            JS_FreeValue(context, value);
+            return false;
+        }
+        previous_step = step;
+    }
+    JS_FreeValue(context, value);
+
+    value = JS_GetPropertyStr(context, song, "events");
+    if (!dashboard_array_length(context, value, &length) ||
+        !dashboard_validate_event_array(context, value, length, length / 5U))
+    {
+        JS_FreeValue(context, value);
+        return false;
+    }
+    JS_FreeValue(context, value);
+
+    value = JS_GetPropertyStr(context, song, "level");
+    if (!JS_IsUndefined(value))
+    {
+        bool valid = dashboard_json_integer(context, value, 1, 3, &number);
+        JS_FreeValue(context, value);
+        if (!valid)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        JS_FreeValue(context, value);
+    }
+
+    value = JS_GetPropertyStr(context, song, "steps");
+    if (!JS_IsUndefined(value))
+    {
+        bool valid = dashboard_json_integer(context, value, 1, 65535, &number);
+        JS_FreeValue(context, value);
+        if (!valid)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        JS_FreeValue(context, value);
+    }
+
+    value = JS_GetPropertyStr(context, song, "title");
+    if (!JS_IsUndefined(value))
+    {
+        valid = dashboard_validate_title(context, value);
+        JS_FreeValue(context, value);
+        if (!valid)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        JS_FreeValue(context, value);
+    }
+    return true;
+}
+
+bool pocketjs_dashboard_validate_song_json(const char *json, size_t length)
+{
+    JSRuntime *runtime;
+    JSContext *context;
+    JSValue song;
+    bool valid;
+
+    if (json == RT_NULL || length == 0U || length > POCKETJS_GAME_SONG_LIMIT)
+    {
+        return false;
+    }
+    runtime = JS_NewRuntime();
+    if (runtime == RT_NULL)
+    {
+        return false;
+    }
+    context = JS_NewContext(runtime);
+    if (context == RT_NULL)
+    {
+        JS_FreeRuntime(runtime);
+        return false;
+    }
+    song = JS_ParseJSON(context, json, length, "<custom-song>");
+    valid = !JS_IsException(song) && dashboard_validate_song_value(context, song);
+    JS_FreeValue(context, song);
+    JS_FreeContext(context);
+    JS_FreeRuntime(runtime);
+    return valid;
+}
+
 /* gameStart(bpm, [step, voice, note, length, volume, ...]) */
 static JSValue dashboard_game_start(JSContext *context, JSValueConst this_value,
                                     int argc, JSValueConst *argv)
@@ -993,15 +1279,16 @@ static JSValue dashboard_game_start(JSContext *context, JSValueConst this_value,
     {
         return JS_FALSE;
     }
-    bpm = dashboard_int_arg(context, argv[0], 0);
-    length_value = JS_GetPropertyStr(context, argv[1], "length");
-    if (JS_ToUint32(context, &length, length_value) < 0)
+    if (!dashboard_json_integer(context, argv[0], 60, 240, &bpm))
     {
-        length = 0U;
+        return JS_FALSE;
     }
-    JS_FreeValue(context, length_value);
+    if (!dashboard_array_length(context, argv[1], &length))
+    {
+        return JS_FALSE;
+    }
     count = length / 5U;
-    if (count == 0U || count > POCKETJS_GAME_MAX_EVENTS || bpm < 60 || bpm > 240)
+    if (!dashboard_validate_event_array(context, argv[1], length, count))
     {
         return JS_FALSE;
     }
@@ -1018,14 +1305,14 @@ static JSValue dashboard_game_start(JSContext *context, JSValueConst this_value,
         for (k = 0U; k < 5U; ++k)
         {
             JSValue item = JS_GetPropertyUint32(context, argv[1], i * 5U + k);
-            field[k] = dashboard_int_arg(context, item, 0);
+            (void)JS_ToInt32(context, &field[k], item);
             JS_FreeValue(context, item);
         }
-        events[i].step = (uint16_t)(field[0] < 0 ? 0 : (field[0] > 65535 ? 65535 : field[0]));
-        events[i].voice = (uint8_t)(field[1] & 0xFF);
-        events[i].note = (uint8_t)(field[2] & 0xFF);
-        events[i].length = (uint8_t)(field[3] < 1 ? 1 : (field[3] > 255 ? 255 : field[3]));
-        events[i].volume = (uint8_t)(field[4] < 0 ? 0 : (field[4] > 127 ? 127 : field[4]));
+        events[i].step = (uint16_t)field[0];
+        events[i].voice = (uint8_t)field[1];
+        events[i].note = (uint8_t)field[2];
+        events[i].length = (uint8_t)field[3];
+        events[i].volume = (uint8_t)field[4];
     }
     started = pocketjs_game_begin((uint32_t)bpm, events, count);
     rt_free(events);

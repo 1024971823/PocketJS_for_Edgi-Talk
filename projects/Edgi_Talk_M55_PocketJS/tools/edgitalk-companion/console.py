@@ -171,11 +171,16 @@ class Console:
         self.send_note = ""
         self.chart_note = "选一个 MIDI 或谱面 JSON。"
         self.song_note = ""
+        self.music_note = ""
+        self.music_phase = ""
+        self.music_sent = 0
+        self.music_total = 0
         self.sending = False
         self.interval = 2
         self.stats: dict[str, Any] | None = None
         self.chart: dict[str, Any] | None = None
         self._lock = threading.Lock()
+        self._xfer = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="edgitalk-console", daemon=True)
@@ -215,6 +220,13 @@ class Console:
                 "sendNote": self.send_note,
                 "chartNote": self.chart_note,
                 "songNote": self.song_note,
+                "musicNote": self.music_note,
+                "musicProgress": {
+                    "active": self.music_phase in ("pack", "send", "write"),
+                    "phase": self.music_phase,
+                    "sent": self.music_sent,
+                    "total": self.music_total,
+                },
             }
 
     def _link(self) -> str:
@@ -298,7 +310,8 @@ class Console:
                 self.connected = True
                 self.device = "EdgiTalk"
                 self.find_note = ""
-                self.song_note = "状态走蓝牙。Wi-Fi 同时开着。自定义曲仍用 Wi-Fi。"
+                self.song_note = "状态走蓝牙。游戏谱面仍用 Wi-Fi。"
+                self.music_note = "主页播放器的歌走蓝牙。Wi-Fi 同时开着。"
             return self.snapshot()
         try:
             info = self._board().status()
@@ -370,11 +383,72 @@ class Console:
             chart = self.chart
         if chart is None:
             raise edgitalk.CompanionError(NEED_CHART)
-        result = self._board().push(edgitalk.encode_chart(chart))
+        payload = edgitalk.encode_chart(chart)
+        size = int(self._board().push(payload).get("size") or len(payload))
         self._remember()
         with self._lock:
             self.connected = True
-            self.song_note = f"已推到板子：{chart.get('title', 'Custom')}，{result.get('size', 0)} 字节。"
+            self.song_note = f"已推到板子：{chart.get('title', 'Custom')}，{size} 字节。"
+        return self.snapshot()
+
+    def _music_progress(self, phase: str, sent: int, total: int) -> None:
+        if phase == "pack":
+            text = "正在压缩…"
+        elif phase == "write":
+            text = "正在写入板子的 flash…"
+        elif phase == "send" and total > 0:
+            percent = min(100, sent * 100 // total)
+            text = f"正在传输 {percent}%（{sent // 1024} / {total // 1024} KB）"
+        else:
+            text = ""
+        with self._lock:
+            self.music_phase = phase
+            self.music_sent = sent
+            self.music_total = total
+            if text:
+                self.music_note = text
+
+    def _read_local_file(self, path: str) -> tuple[str, bytes]:
+        text = os.path.expanduser(str(path or "").strip())
+        if not text or not os.path.isfile(text):
+            raise edgitalk.CompanionError("找不到这个文件")
+        with open(text, "rb") as handle:
+            return os.path.basename(text), handle.read()
+
+    def push_music_path(self, path: str, title: str) -> dict[str, Any]:
+        filename, raw = self._read_local_file(path)
+        return self.push_music(filename, raw, title)
+
+    def store_chart_path(self, path: str, title: str, level: int) -> dict[str, Any]:
+        filename, raw = self._read_local_file(path)
+        return self.store_chart(filename, raw, title, level)
+
+    def push_music(self, filename: str, raw: bytes, title: str) -> dict[str, Any]:
+        if not raw:
+            raise edgitalk.CompanionError("先选择一首歌。")
+        if not self.ble:
+            self.locate()
+        if not self.ble:
+            raise edgitalk.CompanionError("主页播放器要先连上板子的蓝牙。")
+        try:
+            self._music_progress("pack", 0, 0)
+            wav, name = edgitalk.prepare_player_wav(raw, filename, title)
+
+            def tick(sent: int, total: int) -> None:
+                phase = "write" if total and sent >= total else "send"
+                self._music_progress(phase, sent, total)
+
+            import ble
+            with self._xfer:
+                ble.push_music(self.ble, wav, self.token, name, progress=tick)
+        except Exception:
+            self._music_progress("", 0, 0)
+            with self._lock:
+                self.music_note = ""
+            raise
+        self._music_progress("", len(wav), len(wav))
+        with self._lock:
+            self.music_note = f"已传到主页播放器：{name}，{len(wav)} 字节。"
         return self.snapshot()
 
     def pull(self) -> bytes:
@@ -419,7 +493,8 @@ class Console:
                         import ble
                         sent = dict(payload)
                         sent["token"] = self.token
-                        ble.write_stats(self.ble, sent)
+                        with self._xfer:
+                            ble.write_stats(self.ble, sent)
                     else:
                         board.push_stats(payload)
                     note = f"已发送 {time.strftime('%H:%M:%S')}"
@@ -492,6 +567,14 @@ def make_handler(app: Console) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             raw = self._read()
             kind = self.headers.get("Content-Type", "")
+            if path == "/api/local/music":
+                def store_music() -> dict[str, Any]:
+                    fields = parse_multipart(raw, kind)
+                    filename, data = fields.get("file", ("", b""))
+                    title = fields.get("title", ("", b""))[1].decode("utf-8", "replace")
+                    return app.push_music(filename, data, title)
+                self._guard(store_music)
+                return
             if path == "/api/local/chart":
                 def store() -> dict[str, Any]:
                     fields = parse_multipart(raw, kind)
@@ -513,6 +596,11 @@ def make_handler(app: Console) -> type[BaseHTTPRequestHandler]:
                 payload = {}
             routes: dict[str, Callable[[], dict[str, Any]]] = {
                 "/api/local/connect": lambda: app.connect(str(payload.get("token", ""))),
+                "/api/local/music-path": lambda: app.push_music_path(
+                    str(payload.get("path", "")), str(payload.get("title", ""))),
+                "/api/local/chart-path": lambda: app.store_chart_path(
+                    str(payload.get("path", "")), str(payload.get("title", "")),
+                    int(payload.get("level", 2) or 2)),
                 "/api/local/discover": app.locate,
                 "/api/local/interval": lambda: app.set_interval(int(payload.get("interval", 2))),
                 "/api/local/send": lambda: app.set_sending(bool(payload.get("on"))),
@@ -530,17 +618,18 @@ def make_handler(app: Console) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def serve(app: Console, open_browser: bool = True) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+def serve(app: Console, open_browser: bool = True, listen_port: int = 0) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", listen_port), make_handler(app))
     if open_browser:
         webbrowser.open(f"http://127.0.0.1:{server.server_port}/")
     print(f"Edgi Talk  http://127.0.0.1:{server.server_port}/   Ctrl-C 退出")
     return server
 
 
-def run_console(host: str = "", token: str = "", port: int = edgitalk.HTTP_PORT, open_browser: bool = True) -> int:
+def run_console(host: str = "", token: str = "", port: int = edgitalk.HTTP_PORT, open_browser: bool = True,
+                listen_port: int = 0) -> int:
     app = Console(host=host, token=token, port=port)
-    server = serve(app, open_browser=open_browser)
+    server = serve(app, open_browser=open_browser, listen_port=listen_port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

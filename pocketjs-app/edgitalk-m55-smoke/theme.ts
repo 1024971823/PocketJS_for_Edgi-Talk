@@ -4,7 +4,7 @@
 // as complete class strings instead of being assembled from parts at runtime.
 // Runtime colors (style objects) use the hex constants in `color`.
 
-export const TICK_HZ = 30;
+export const TICK_HZ = 60;
 export const SCREEN_W = 400;
 export const SCREEN_H = 240;
 

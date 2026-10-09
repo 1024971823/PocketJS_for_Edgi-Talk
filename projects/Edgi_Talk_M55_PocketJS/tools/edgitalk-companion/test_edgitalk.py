@@ -107,7 +107,7 @@ class CompanionTests(unittest.TestCase):
         bad = edgitalk.Board("127.0.0.1", "000000", port=HTTP_PORT)
         payload = edgitalk.encode_chart(edgitalk.demo_chart())
         for _ in range(5):
-            with self.assertRaisesRegex(edgitalk.CompanionError, "401"):
+            with self.assertRaisesRegex(edgitalk.CompanionError, "pairing code|401"):
                 bad.push(payload)
         with self.assertRaisesRegex(edgitalk.CompanionError, "429"):
             self.board.push(payload)  # even the right code is refused while locked
@@ -170,6 +170,17 @@ class CompanionTests(unittest.TestCase):
 
     def test_validate_reports_problems(self):
         self.assertTrue(edgitalk.validate_chart({"bpm": 20, "notes": [], "events": [1, 2]}))
+        chart = edgitalk.demo_chart()
+        chart["events"] = chart["events"][:5] + [0, 0, 60, 0, 200]
+        self.assertTrue(any("length" in problem for problem in edgitalk.validate_chart(chart)))
+        chart["events"] = chart["events"][:5] + [0, 0, 60, 1, 200]
+        self.assertTrue(any("volume" in problem for problem in edgitalk.validate_chart(chart)))
+
+    def test_private_reads_require_token(self):
+        anonymous = edgitalk.Board("127.0.0.1", "", port=HTTP_PORT)
+        for operation in (anonymous.scores, anonymous.pull, anonymous.pc):
+            with self.assertRaisesRegex(edgitalk.CompanionError, "pairing code|401"):
+                operation()
 
 
 class ConsoleApiTests(unittest.TestCase):
@@ -186,6 +197,7 @@ class ConsoleApiTests(unittest.TestCase):
     def tearDown(self):
         self.app.close()
         self.server.shutdown()
+        self.server.server_close()
 
     def post(self, path, body):
         request = urllib.request.Request(
@@ -196,7 +208,8 @@ class ConsoleApiTests(unittest.TestCase):
             with self.opener.open(request, timeout=3) as response:
                 return response.status, json.load(response)
         except urllib.error.HTTPError as error:
-            return error.code, json.load(error)
+            with error:
+                return error.code, json.load(error)
 
     def test_connect_requires_the_pair_code(self):
         code, body = self.post("/api/local/connect", {})
@@ -208,6 +221,11 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertFalse(body["ok"])
         self.assertIn("没有找到板子", body["error"])
+
+    def test_music_path_requires_a_real_file(self):
+        code, body = self.post("/api/local/music-path", {"path": "/tmp/edgitalk-missing.mp3", "title": "x"})
+        self.assertEqual(code, 400)
+        self.assertIn("找不到", body["error"])
 
     def test_chart_preview(self):
         chart = edgitalk.demo_chart()

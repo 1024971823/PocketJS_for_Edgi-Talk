@@ -5,8 +5,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJECT="$(cd "$HERE/../.." && pwd)"
 WORK="$(cd "$PROJECT/../../.." && pwd)"      # .../b/work
-POCKET="$WORK/pocketjs"
-QJS="$WORK/quickjs-ng"
+POCKET="${POCKETJS_ROOT:-$WORK/pocketjs}"
+QJS="${QUICKJS_ROOT:-$WORK/quickjs-ng}"
 COMP="$POCKET/hosts/esp-idf/components"
 OUT="${PREVIEW_OUT:-/tmp/pjs-preview}"
 APP="$PROJECT/applications/pocketjs"
@@ -45,8 +45,10 @@ gcc -O1 -g -std=gnu17 -D_GNU_SOURCE -w -include "$APP/include/pocketjs_qjs_ng_co
   "$OUT/cargo/ui-core/release/libpocketjs_idf_ui_core.a" \
   -lm -lpthread -ldl -o "$OUT/harness"
 
-export PATH="$HOME/.bun/bin:$PATH"
-( cd "$HERE" && bun build scenario.ts --outfile "$OUT/scenario.js" --target browser --format iife >/dev/null )
+bun_bin="${BUN_BIN:-$HOME/.bun/bin/bun}"
+if [[ ! -x "$bun_bin" ]]; then bun_bin="$(command -v bun || true)"; fi
+[[ -n "$bun_bin" ]] || { echo "bun not found; set BUN_BIN" >&2; exit 1; }
+( cd "$HERE" && "$bun_bin" build scenario.ts --outfile "$OUT/scenario.js" --target browser --format iife >/dev/null )
 { echo "globalThis.__mode=\"$MODE\"; globalThis.__song=$SONG;"; cat "$HERE/prelude.js"; } > "$OUT/prelude.js"
 rm -f "$OUT/shots/"*.ppm "$OUT/shots/"*.png
 "$OUT/harness" "$OUT/prelude.js" "$OUT/scenario.js" "$OUT/shots" "$FRAMES"

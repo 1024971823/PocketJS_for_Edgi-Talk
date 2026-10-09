@@ -17,7 +17,9 @@ if os.getenv('RTT_ROOT'):
 # EXEC_PATH is the compiler execute path, for example, CodeSourcery, Keil MDK, IAR
 if  CROSS_TOOL == 'gcc':
     PLATFORM    = 'gcc'
-    EXEC_PATH   = r'C:\RT-ThreadStudio\repo\Extract\ToolChain_Support_Packages\ARM\GNU_Tools_for_ARM_Embedded_Processors\13.3\bin'
+    import shutil
+    gcc = shutil.which('arm-none-eabi-gcc')
+    EXEC_PATH = os.path.dirname(gcc) if gcc else ''
 elif CROSS_TOOL == 'keil':
     PLATFORM    = 'armclang'
     EXEC_PATH   = r'C:/Keil_v5'
@@ -57,7 +59,7 @@ if PLATFORM == 'gcc':
         CFLAGS += ' -O3 -gdwarf-2 -g'
         AFLAGS += ' -gdwarf-2'
 
-    # CXXFLAGS = CFLAGS 
+    # CXXFLAGS = CFLAGS
     CXXFLAGS = CFLAGS  + ' -std=c++17'
 
     POST_ACTION = 'python -c "import os;os.path.exists(\'Debug\') or os.makedirs(\'Debug\')"\n' + OBJCPY + ' -O ihex $TARGET Debug/rtthread.hex\n' + SIZE + ' $TARGET \n'
@@ -89,7 +91,7 @@ elif PLATFORM == 'armclang':
         AFLAGS += ' -g'
     else:
         CFLAGS += ' -O2'
-        
+
     CXXFLAGS = CFLAGS
     CFLAGS += ' -std=c99'
 

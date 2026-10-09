@@ -4,7 +4,7 @@ import { Image, View, type NodeMirror } from "@pocketjs/framework/components";
 import { jump } from "@pocketjs/framework/animation";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { onFrame } from "@pocketjs/framework/solid/lifecycle";
-import { color } from "../theme.ts";
+import { TICK_HZ, color } from "../theme.ts";
 import { game } from "../native.ts";
 import {
   NOTE_AIR,
@@ -38,6 +38,8 @@ const WAIT_X = SCREEN_W - 1;
 const RING_AIR = "#4fb8e8";
 const RING_GROUND = "#ff6f7d";
 const RING_LIT = "#ffffff";
+const START_TIMEOUT_FRAMES = TICK_HZ * 3;
+const HIT_FLASH_FRAMES = Math.max(1, Math.round((TICK_HZ * 5) / 30));
 const PERFECT_MS = 90;
 const GREAT_MS = 170;
 const BONUS_MS = 350;
@@ -105,6 +107,8 @@ export function Stage(props: StageProps): JSX.Element {
   const active: number[] = [];
   let nextSpawn = 0;
 
+  const placedX: number[][] = [[], [], [], []];
+
   let runner: NodeMirror | undefined;
   let airRing: NodeMirror | undefined;
   let groundRing: NodeMirror | undefined;
@@ -142,12 +146,19 @@ export function Stage(props: StageProps): JSX.Element {
   let startedFrame = 0;
   let finished = false;
 
+  function placeNote(type: number, slot: number, x: number): void {
+    const px = Math.round(x);
+    if (placedX[type][slot] === px) return;
+    placedX[type][slot] = px;
+    const node = pools[type][slot];
+    if (node) jump(node, "translateX", px);
+  }
+
   function releaseSlot(index: number): void {
     const slot = noteSlot[index];
     if (slot < 0) return;
     const type = noteType[index];
-    const node = pools[type][slot];
-    if (node) jump(node, "translateX", WAIT_X);
+    placeNote(type, slot, WAIT_X);
     freeSlots[type].push(slot);
     noteSlot[index] = -1;
   }
@@ -220,8 +231,8 @@ export function Stage(props: StageProps): JSX.Element {
   }
 
   function tap(lane: number, now: number): void {
-    if (lane === 1) airFlash = 5;
-    else groundFlash = 5;
+      if (lane === 1) airFlash = HIT_FLASH_FRAMES;
+    else groundFlash = HIT_FLASH_FRAMES;
 
     let best = -1;
     let bestDelta = GREAT_MS + 1;
@@ -283,7 +294,7 @@ export function Stage(props: StageProps): JSX.Element {
     const raw = game.clock();
     if (raw < 0) {
       // The synthesizer has not produced its first block yet.
-      if (frame - startedFrame > 90) {
+      if (frame - startedFrame > START_TIMEOUT_FRAMES) {
         game.stop();
         setStartFailed(true);
         setPhase("ready");
@@ -326,8 +337,7 @@ export function Stage(props: StageProps): JSX.Element {
         active.splice(k, 1);
         continue;
       }
-      const node = pools[type][noteSlot[index]];
-      if (node) jump(node, "translateX", Math.min(x - size / 2, WAIT_X));
+      placeNote(type, noteSlot[index], Math.min(x - size / 2, WAIT_X));
     }
 
     // Hit-zone pulse on the beat, brighter right after a tap.

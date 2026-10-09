@@ -4,13 +4,14 @@
  * One worker thread owns everything slow: it renders the synthesizer into the
  * sound0 device (blocking writes pace it), keeps the song clock, and persists
  * scores/settings to /flash. The UI thread only flips flags and reads cached
- * values, so a 30 Hz frame never waits on audio or flash.
+ * values, so a 60 Hz frame never waits on audio or flash.
  */
 
 #include "pocketjs_game.h"
 #include "pocketjs_music.h"
 #include "pocketjs_synth.h"
 
+#include <cy_syslib.h>
 #include <rtdevice.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -155,10 +156,16 @@ static void game_ensure_token(void)
     rt_mutex_take(&s_store_lock, RT_WAITING_FOREVER);
     if (s_store.token < 100000U || s_store.token > 999999U)
     {
-        uint32_t seed = rt_tick_get() * 2654435761U;
+        uint32_t local = (uint32_t)(uintptr_t)&s_store;
+        uint32_t seed = (uint32_t)Cy_SysLib_GetUniqueId();
 
-        srand(seed ^ (uint32_t)(uintptr_t)&seed);
-        s_store.token = 100000U + ((uint32_t)rand() ^ (seed >> 7)) % 900000U;
+        seed ^= (uint32_t)(Cy_SysLib_GetUniqueId() >> 32) ^ local ^
+                rt_tick_get_millisecond() ^ (uint32_t)rand();
+        seed += 0x9E3779B9U;
+        seed = (seed ^ (seed >> 16)) * 0x21F0AAADU;
+        seed = (seed ^ (seed >> 15)) * 0x735A2D97U;
+        seed ^= seed >> 15;
+        s_store.token = 100000U + seed % 900000U;
         s_dirty = RT_TRUE;
     }
     s_loaded = RT_TRUE;
@@ -495,7 +502,52 @@ int pocketjs_game_custom_open(void)
     {
         return -1;
     }
-    return open(GAME_SONG_TEMP, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    return open(GAME_SONG_TEMP, O_RDWR | O_CREAT | O_TRUNC, 0600);
+}
+
+char *pocketjs_game_custom_staged_read(int fd, size_t *length)
+{
+    struct stat info;
+    size_t size;
+    size_t used = 0U;
+    char *text;
+
+    if (length != NULL)
+    {
+        *length = 0U;
+    }
+    if (fd < 0 || fstat(fd, &info) != 0 || info.st_size < 0 ||
+        (size_t)info.st_size > POCKETJS_GAME_SONG_LIMIT)
+    {
+        return NULL;
+    }
+    size = (size_t)info.st_size;
+    if (size == 0U || lseek(fd, 0, SEEK_SET) != 0)
+    {
+        return NULL;
+    }
+    text = (char *)rt_malloc(size + 1U);
+    if (text == NULL)
+    {
+        return NULL;
+    }
+    while (used < size)
+    {
+        int count = read(fd, text + used, size - used);
+
+        if (count <= 0)
+        {
+            rt_free(text);
+            return NULL;
+        }
+        used += (size_t)count;
+    }
+    text[size] = '\0';
+    if (length != NULL)
+    {
+        *length = size;
+    }
+    return text;
 }
 
 bool pocketjs_game_custom_commit(int fd, size_t total)
