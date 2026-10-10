@@ -28,8 +28,8 @@
 #include <unistd.h>
 
 #define MUSIC_TEMP      "/flash/m_incoming.wav"
-#define MUSIC_NAME_MAX  16
-#define MUSIC_BYTE_MAX  (380U * 1024U)
+#define MUSIC_NAME_MAX  POCKETJS_GAME_MUSIC_NAME_MAX
+#define MUSIC_BYTE_MAX  POCKETJS_GAME_PLAYER_WAV_LIMIT
 
 #define HCI_RESET            0x0C03U
 #define HCI_SET_EVENT_MASK   0x0C01U

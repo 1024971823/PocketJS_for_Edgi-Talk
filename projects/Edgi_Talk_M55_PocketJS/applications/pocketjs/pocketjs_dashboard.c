@@ -1068,7 +1068,7 @@ static bool dashboard_validate_event_array(JSContext *context, JSValueConst valu
 
             if (k == 0U)
             {
-                maximum = 65535;
+                maximum = POCKETJS_GAME_STEP_MAX;
             }
             else if (k == 1U)
             {
@@ -1122,7 +1122,7 @@ static bool dashboard_validate_title(JSContext *context, JSValueConst value)
             ++i;
         }
     }
-    valid = characters <= 64U;
+    valid = characters <= POCKETJS_GAME_TITLE_MAX;
     JS_FreeCStringUTF16(context, text);
     return valid;
 }
@@ -1141,7 +1141,7 @@ static bool dashboard_validate_song_value(JSContext *context, JSValueConst song)
         return false;
     }
     value = JS_GetPropertyStr(context, song, "bpm");
-    valid = dashboard_json_integer(context, value, 60, 240, &number);
+    valid = dashboard_json_integer(context, value, POCKETJS_GAME_BPM_MIN, POCKETJS_GAME_BPM_MAX, &number);
     JS_FreeValue(context, value);
     if (!valid)
     {
@@ -1162,7 +1162,7 @@ static bool dashboard_validate_song_value(JSContext *context, JSValueConst song)
         int32_t kind;
         JSValue step_value = JS_GetPropertyUint32(context, value, i);
         JSValue kind_value = JS_GetPropertyUint32(context, value, i + 1U);
-        bool valid = dashboard_json_integer(context, step_value, 0, 65535, &step) &&
+        bool valid = dashboard_json_integer(context, step_value, 0, POCKETJS_GAME_STEP_MAX, &step) &&
                      step >= previous_step &&
                      dashboard_json_integer(context, kind_value, 0, 3, &kind);
         JS_FreeValue(context, step_value);
@@ -1188,7 +1188,7 @@ static bool dashboard_validate_song_value(JSContext *context, JSValueConst song)
     value = JS_GetPropertyStr(context, song, "level");
     if (!JS_IsUndefined(value))
     {
-        bool valid = dashboard_json_integer(context, value, 1, 3, &number);
+        bool valid = dashboard_json_integer(context, value, POCKETJS_GAME_LEVEL_MIN, POCKETJS_GAME_LEVEL_MAX, &number);
         JS_FreeValue(context, value);
         if (!valid)
         {
@@ -1203,7 +1203,7 @@ static bool dashboard_validate_song_value(JSContext *context, JSValueConst song)
     value = JS_GetPropertyStr(context, song, "steps");
     if (!JS_IsUndefined(value))
     {
-        bool valid = dashboard_json_integer(context, value, 1, 65535, &number);
+        bool valid = dashboard_json_integer(context, value, 1, POCKETJS_GAME_STEP_MAX, &number);
         JS_FreeValue(context, value);
         if (!valid)
         {
@@ -1279,7 +1279,7 @@ static JSValue dashboard_game_start(JSContext *context, JSValueConst this_value,
     {
         return JS_FALSE;
     }
-    if (!dashboard_json_integer(context, argv[0], 60, 240, &bpm))
+    if (!dashboard_json_integer(context, argv[0], POCKETJS_GAME_BPM_MIN, POCKETJS_GAME_BPM_MAX, &bpm))
     {
         return JS_FALSE;
     }

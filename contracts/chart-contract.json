@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "limits": {
+    "song_limit_bytes": 98304,
+    "player_wav_limit_bytes": 389120,
+    "music_name_max_bytes": 16,
+    "max_events": 2000,
+    "max_notes": 2000,
+    "max_chart_steps": 65535,
+    "bpm_min": 60,
+    "bpm_max": 240,
+    "title_max_code_points": 64,
+    "level_min": 1,
+    "level_max": 3
+  }
+}

@@ -44,6 +44,12 @@ PLAYER_WAV_LIMIT = 380 * 1024
 MAX_EVENTS = 2000
 MAX_NOTES = 2000
 MAX_CHART_STEPS = 65535
+BPM_MIN = 60
+BPM_MAX = 240
+TITLE_MAX_CODE_POINTS = 64
+LEVEL_MIN = 1
+LEVEL_MAX = 3
+PLAYER_NAME_MAX = 16
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".edgitalk.json")
 
 VOICE_LEAD, VOICE_BASS, VOICE_DRUM = 0, 1, 2
@@ -217,15 +223,15 @@ def validate_chart(chart: Any) -> list[str]:
         return ["chart must be a JSON object"]
 
     bpm = chart.get("bpm")
-    if not _is_int(bpm) or not 60 <= bpm <= 240:
-        problems.append("bpm must be an integer between 60 and 240")
+    if not _is_int(bpm) or not BPM_MIN <= bpm <= BPM_MAX:
+        problems.append(f"bpm must be an integer between {BPM_MIN} and {BPM_MAX}")
 
-    if "title" in chart and (not isinstance(chart["title"], str) or len(chart["title"]) > 64):
-        problems.append("title must be a string of at most 64 characters")
-    if "level" in chart and (not _is_int(chart["level"]) or not 1 <= chart["level"] <= 3):
-        problems.append("level must be an integer 1..3")
+    if "title" in chart and (not isinstance(chart["title"], str) or len(chart["title"]) > TITLE_MAX_CODE_POINTS):
+        problems.append(f"title must be a string of at most {TITLE_MAX_CODE_POINTS} characters")
+    if "level" in chart and (not _is_int(chart["level"]) or not LEVEL_MIN <= chart["level"] <= LEVEL_MAX):
+        problems.append(f"level must be an integer {LEVEL_MIN}..{LEVEL_MAX}")
     if "steps" in chart and (not _is_int(chart["steps"]) or not 1 <= chart["steps"] <= MAX_CHART_STEPS):
-        problems.append("steps must be an integer 1..65535")
+        problems.append(f"steps must be an integer 1..{MAX_CHART_STEPS}")
 
     notes = chart.get("notes")
     if (not isinstance(notes, list) or len(notes) < 2 or len(notes) % 2 or
@@ -238,7 +244,7 @@ def validate_chart(chart: Any) -> list[str]:
         for index in range(0, len(notes), 2):
             step, kind = notes[index:index + 2]
             if not _is_int(step) or not 0 <= step <= MAX_CHART_STEPS:
-                problems.append(f"notes[{index}]: step must be an integer 0..65535")
+                problems.append(f"notes[{index}]: step must be an integer 0..{MAX_CHART_STEPS}")
                 break
             if step < previous_step:
                 problems.append(f"notes[{index}]: steps must be nondecreasing")
@@ -261,7 +267,7 @@ def validate_chart(chart: Any) -> list[str]:
                 problems.append(f"events[{index}]: all fields must be integers")
                 break
             if not 0 <= step <= MAX_CHART_STEPS:
-                problems.append(f"events[{index}]: step must be 0..65535")
+                problems.append(f"events[{index}]: step must be 0..{MAX_CHART_STEPS}")
                 break
             if voice not in (0, 1, 2):
                 problems.append(f"events[{index + 1}]: voice must be 0..2")

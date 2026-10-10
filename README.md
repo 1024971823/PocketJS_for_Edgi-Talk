@@ -14,6 +14,21 @@
 
 把本仓库里的 `projects/` 和 `libraries/` 覆盖到上游 BSP 同名路径，再按 `bsp-patches/` 里的补丁改对应文件。界面源码在单独的 PocketJS 仓库里构建，产物已经放在固件工程的 `applications/pocketjs/generated/`。
 
+## 工程入口
+
+根目录 `Makefile` 是统一入口：
+
+```sh
+make help
+make source-check         # 只有本仓库源码时运行
+make check                # 有完整 BSP 时自动执行严格构建图检查
+make test                 # 上位机单测和 host synth
+make build ARGS=-j8
+make release-check
+```
+
+模块边界、数据流、跨语言限制契约和发布路径见 [`docs/工程框架.md`](docs/工程框架.md)，提交流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。CI 在 `.github/workflows/ci.yml` 中使用 source-safe 检查。
+
 ## 使用
 
 板上用法、编译烧录和上位机见 `projects/Edgi_Talk_M55_PocketJS/docs/`。

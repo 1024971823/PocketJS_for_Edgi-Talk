@@ -11,3 +11,5 @@ Edgi-Talk M55 上的 PocketJS 固件：主页仪表盘、Beat Dash 节奏游戏�
 | [性能测量](性能测量.md) | 接 KitProg3，在板子上测帧率和截屏 |
 
 界面源码在仓库外的 `b/work/pocketjs/apps/edgitalk-m55-smoke/`，那边的 `README.md` 只说明目录和渲染约束。
+
+工程模块边界、源码-only/完整构建模式和跨语言契约见仓库根目录的 [`工程框架.md`](../../../docs/工程框架.md)。

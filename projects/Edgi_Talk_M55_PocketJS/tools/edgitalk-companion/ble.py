@@ -229,8 +229,8 @@ def push_music(mac: str, wav: bytes, token: str, title: str, progress=None) -> N
     name = title.strip().encode("ascii")
     if len(code) != 6:
         raise edgitalk.CompanionError("配对码要是六位数字")
-    if not name or len(name) > 16:
-        raise edgitalk.CompanionError("歌名要用 1 到 16 个英文字")
+    if not name or len(name) > edgitalk.PLAYER_NAME_MAX:
+        raise edgitalk.CompanionError(f"歌名要用 1 到 {edgitalk.PLAYER_NAME_MAX} 个英文字")
     report(0)
     _write_bytes(b"M" + code + struct.pack("<IB", len(wav), len(name)) + name)
     step = 160

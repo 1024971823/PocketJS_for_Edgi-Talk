@@ -14,7 +14,9 @@
 #include "pocketjs_synth.h"
 
 #define POCKETJS_GAME_SLOTS      8U
-#define POCKETJS_GAME_SONG_LIMIT (96U * 1024U)
+#define POCKETJS_GAME_SONG_LIMIT       (96U * 1024U)
+#define POCKETJS_GAME_PLAYER_WAV_LIMIT (380U * 1024U)
+#define POCKETJS_GAME_MUSIC_NAME_MAX   16U
 
 
 /* Create the audio/storage worker and load saved scores. Safe to call twice. */

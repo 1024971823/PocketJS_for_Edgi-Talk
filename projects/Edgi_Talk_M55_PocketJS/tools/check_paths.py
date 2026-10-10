@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 PATTERN = re.compile(r"/home/[^/\s\"']+|/Users/[^/\s\"']+|[A-Za-z]:\\\\")
 IGNORED_NAMES = {".sconsign.dblite", "rt-thread.elf", "rtthread.map"}
 IGNORED_SUFFIXES = {".a", ".dblite", ".dep", ".d", ".elf", ".hex", ".map", ".o", ".obj", ".pyc"}

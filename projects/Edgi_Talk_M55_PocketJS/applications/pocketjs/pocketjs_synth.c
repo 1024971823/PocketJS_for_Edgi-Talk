@@ -115,7 +115,7 @@ uint32_t pocketjs_synth_load(uint32_t bpm, const pocketjs_game_event_t *events, 
     pocketjs_synth_init();
     s_count = 0U;
     s_next = 0U;
-    if (events == NULL || count == 0U || bpm < 60U || bpm > 240U)
+    if (events == NULL || count == 0U || bpm < POCKETJS_GAME_BPM_MIN || bpm > POCKETJS_GAME_BPM_MAX)
     {
         return 0U;
     }
