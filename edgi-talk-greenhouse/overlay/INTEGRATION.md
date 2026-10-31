@@ -4,10 +4,18 @@
 [`RT-Thread-Studio/sdk-bsp-psoc_e84-edgi-talk`](https://github.com/RT-Thread-Studio/sdk-bsp-psoc_e84-edgi-talk)
 中的 `projects/Edgi_Talk_M55_XiaoZhi` 准备的增量文件。
 
-传感器增量仍然是下面的 2 步。屏幕不是这 4 处小补丁了：当前固件用的是
-多页面 LVGL（主页 / 网络 / 日历 / 作物），布局契约在小智工程的
-`applications/xiaozhi/ui/gh_ui_layout.h`，说明见 `docs/05-界面框架.md`。
-不要把本文后半的 `xiaozhi_ui_set_greenhouse()` 补丁打进那套新界面。
+**当前版本（2026-11-01）是一次整目录覆盖，不再有 `xiaozhi_ui.c` 补丁。**
+overlay 携带三个目录，全部拷进 `applications/xiaozhi/` 即可：
+
+| 目录 | 内容 |
+|---|---|
+| `greenhouse/` | 传感器采样/报警 + IoT Thing + MCP 工具 |
+| `ui/` | 横屏多页面 LVGL：主页/网络/日历/作物/设置 + 手绘管家 + NTP 校时接入 |
+| `sensors/` | `sensor_monitor`（真实 AHT20/IMU/电池/WiFi）+ `gh_ntp` 网络校时 |
+
+`ui/`、`sensors/` 与官方目录同名：官方这两个 `SConscript` 本身就
+`Glob('*.c')`，整目录拷过去即被自动编译，**不删不改任何官方构建文件**。
+旧版 4 处 `xiaozhi_ui_set_greenhouse` 补丁已废弃（见文末「历史版本」），勿再打。
 
 ---
 
@@ -19,41 +27,42 @@
 
 ---
 
-## 步骤 ①：拷贝 greenhouse 目录
+## 步骤 ①：拷贝 `greenhouse/`（传感器 + IoT + MCP）
 
-把本目录下的 `applications/xiaozhi/greenhouse/` 整个目录拷贝到：
+把 `applications/xiaozhi/greenhouse/` 整个目录拷到
+`<BSP>/projects/Edgi_Talk_M55_XiaoZhi/applications/xiaozhi/greenhouse/`。
+含 5 个文件：`SConscript`、`greenhouse_sensor.h/.cpp`（裸 I2C AHT20 驱动，
+自动探测 i2c1/i2c2/i2c0 + 采样线程 + 报警状态机 + 红灯 + MSH 命令）、
+`greenhouse_thing.cpp`（IoT Thing，属性随 states 上报）、
+`greenhouse_mcp.cpp`（`self.greenhouse.*` 工具）。
+
+> 官方 `applications/xiaozhi/SConscript` 会自动发现带 `SConscript` 的子目录，
+> 不需要改任何官方文件。
+
+## 步骤 ②：拷贝 `ui/` 与 `sensors/`（横屏界面 + 校时）
+
+把 `applications/xiaozhi/ui/` 与 `applications/xiaozhi/sensors/` 整目录拷到
+`<BSP>/projects/Edgi_Talk_M55_XiaoZhi/applications/xiaozhi/` 下（覆盖/合并官方
+同名目录里的 `*.c`）。这两个官方 SConscript 本来就是 `Glob('*.c')`，拷入即编译，
+无需 SConscript 改动：
 
 ```
-<BSP>/projects/Edgi_Talk_M55_XiaoZhi/applications/xiaozhi/greenhouse/
+ui/       gh_ui_layout.h(设计令牌+布局)  gh_ui_pages.h(页面引擎接口)
+          xiaozhi_ui.c(页面管理/顶栏/告警条/气泡/标签)  gh_butler.c/.h(手绘管家)
+          gh_page_main/net/cal/crop/set.c(5 个页面)
+sensors/  sensor_monitor.c/.h(AHT20/IMU/电池/WiFi 真实快照 + 报警状态机)
+          gh_ntp.c/.h(SNTP v4 校时，联网自动 + 设置页手动 + msh `ntp_sync`)
 ```
 
-拷贝后应包含 5 个文件：
-
-```
-greenhouse/
-├── SConscript               # 构建脚本（父级 xiaozhi/SConscript 自动发现子目录，无需改任何构建文件）
-├── greenhouse_sensor.h
-├── greenhouse_sensor.cpp    # 裸I2C AHT20驱动(自动探测i2c1/i2c2/i2c0)+采样线程+报警状态机+红灯+屏幕推送+MSH命令
-├── greenhouse_thing.cpp     # 小智 IoT Thing（属性随 states 上报，注入大模型上下文）
-└── greenhouse_mcp.cpp       # 小智 MCP 工具（self.greenhouse.*）
-```
-
-> 原理：官方 `applications/xiaozhi/SConscript` 会遍历自己的子目录，凡带有
-> `SConscript` 的子目录都会自动加入编译，因此这一步不需要修改任何官方文件。
->
-> AHT20 读取**不依赖 aht10 软件包和 menuconfig**：驱动用裸 I2C（读法与官方
-> SDK 里 `Edgi_Talk_M55_GitHub_Profile/.../sensor_monitor.c` 的实测代码一致），
-> 上电自动探测 i2c1 → i2c2 → i2c0，不同批次/拓展板都能找到。
+> 需要横屏：`rtconfig.h` 里 `BSP_LCD_ROTATION_DEGREES` 设为 90（官方 Kconfig
+> 默认就是 90° landscape），且 `lv_conf.h` 关闭 `LV_USE_PERF_MONITOR`。
 
 ---
 
-## 步骤 ②：给 UI 打 4 处小补丁（屏幕显示温湿度/报警）
+## 历史版本（已废弃，勿用）
 
-补丁对象是官方 `applications/xiaozhi/ui/xiaozhi_ui.h` 和 `xiaozhi_ui.c`，
-全部是增量式小改。**必做**——`greenhouse_sensor.cpp` 引用了补丁提供的
-`xiaozhi_ui_set_greenhouse()`，不打补丁会链接失败。（若确实不想改 UI，
-需删除 `greenhouse_sensor.cpp` 中的 `extern "C" void xiaozhi_ui_set_greenhouse(...);`
-声明和 `gh_push_ui()` 的调用。）
+以下是旧单页版本的 4 处 `xiaozhi_ui_set_greenhouse` 补丁；当前多页面 UI 已自带
+温室显示，**不要**打进 `ui/xiaozhi_ui.c`。保留仅作对照。
 
 ### 补丁 1/4：`ui/xiaozhi_ui.h` 增加函数声明
 

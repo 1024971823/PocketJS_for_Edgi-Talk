@@ -31,6 +31,7 @@
 #include "gh_ui_layout.h"
 #include "gh_butler.h"
 #include "../sensors/sensor_monitor.h"
+#include "../sensors/gh_ntp.h"
 
 /*****************************************************************************
  * 宏定义
@@ -72,23 +73,24 @@ extern void lv_port_indev_init(void);
 #define BUBBLE_W            GH_BUBBLE_W
 #define BUBBLE_HIDE_MS      GH_BUBBLE_HIDE_MS
 
-_Static_assert(GH_BODY_X + GH_BODY_W <= GH_AVA_X, "page body overlaps the butler");
+/* GH_BODY 可延伸到管家列（x 至 656)：页面下排内容统一收在 GH_LOWER_W(540) 内，
+ * 与管家/气泡的 y 区间错开，不遮挡。仅断言真正会相撞的两项。 */
 _Static_assert(GH_BUBBLE_X >= GH_BODY_X + GH_LOWER_W, "bubble covers the lower parameter row");
 _Static_assert(GH_BUBBLE_Y + GH_BUBBLE_H <= GH_AVA_Y, "bubble overlaps the butler");
 _Static_assert(GH_AVA_X + GH_AVA_W <= GH_SCR_W && GH_AVA_Y + GH_AVA_H <= GH_SCR_H,
                "butler is off the 800x480 screen");
 
-/* 配色 */
-#define C_BG                0x000000
-#define C_CARD              0x151B24
-#define C_CARD_ALERT        0x3A1518
-#define C_TEXT              0xFFFFFF
-#define C_TEXT_DIM          0x8A93A6
-#define C_ACCENT            0x35C4A0    /* 青绿：数值/正常 */
-#define C_ALERT             0xFF5050    /* 红：报警 */
-#define C_TAB_BG            0x1C2430
-#define C_TAB_ACTIVE        0x2A5FBF
-#define C_BUBBLE_BG         0x20293A
+/* 配色：统一引用 gh_ui_layout.h 的设计令牌（深苔绿暗色主题） */
+#define C_BG                GH_COL_BG
+#define C_CARD              GH_COL_CARD
+#define C_CARD_ALERT        GH_COL_ALERT_BG
+#define C_TEXT              GH_COL_TEXT
+#define C_TEXT_DIM          GH_COL_TEXT_DIM
+#define C_ACCENT            GH_COL_ACCENT
+#define C_ALERT             GH_COL_ALERT
+#define C_TAB_BG            GH_COL_TAB_BG
+#define C_TAB_ACTIVE        GH_COL_TAB_ACT
+#define C_BUBBLE_BG         GH_COL_PANEL
 
 /*****************************************************************************
  * 类型定义
@@ -140,9 +142,9 @@ static rt_bool_t s_banner_on = RT_FALSE;
 
 /* 页面管理 */
 static lv_obj_t *s_body;                    /* 页面主体容器 */
-static lv_obj_t *s_page_roots[4];           /* 各页根容器(懒创建) */
-static const gh_page_t *s_pages[4];         /* 页面注册表 */
-static lv_obj_t *s_tab_btns[4];
+static lv_obj_t *s_page_roots[GH_PAGE_NUM];    /* 各页根容器(懒创建) */
+static const gh_page_t *s_pages[GH_PAGE_NUM];  /* 页面注册表 */
+static lv_obj_t *s_tab_btns[GH_PAGE_NUM];
 static int s_page_cur = -1;                 /* 当前页索引, -1=未初始化 */
 
 /* 头像面板（跨页面常驻, 右下角） */
@@ -259,17 +261,26 @@ static rt_bool_t output_is_ignored(const char *text)
  *****************************************************************************/
 static void tab_style_refresh(void)
 {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < GH_PAGE_NUM; i++)
     {
+        rt_bool_t sel = (i == s_page_cur);
         lv_obj_set_style_bg_color(s_tab_btns[i],
-            (i == s_page_cur) ? lv_color_hex(C_TAB_ACTIVE) : lv_color_hex(C_TAB_BG),
+            sel ? lv_color_hex(GH_COL_TAB_ACT) : lv_color_hex(GH_COL_TAB_BG),
             LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(s_tab_btns[i],
+            sel ? lv_color_hex(GH_COL_ACCENT) : lv_color_hex(GH_COL_DIVIDER),
+            LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_t *lb = lv_obj_get_child(s_tab_btns[i], 0);
+        if (lb)
+            lv_obj_set_style_text_color(lb,
+                sel ? lv_color_hex(GH_COL_ACCENT) : lv_color_hex(GH_COL_TEXT_DIM),
+                LV_PART_MAIN | LV_STATE_DEFAULT);
     }
 }
 
 static void page_switch(int idx)
 {
-    if (idx < 0 || idx >= 4 || idx == s_page_cur)
+    if (idx < 0 || idx >= GH_PAGE_NUM || idx == s_page_cur)
         return;
 
     /* 首次进入：创建该页控件 */
@@ -307,20 +318,23 @@ static void tab_clicked_cb(lv_event_t *e)
 /* 底部标签按钮行 */
 static void tabs_create(lv_obj_t *parent)
 {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < GH_PAGE_NUM; i++)
     {
         lv_obj_t *btn = lv_button_create(parent);
         lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_size(btn, TAB_W, TAB_H);
-        lv_obj_set_pos(btn, BODY_X + i * (TAB_W + 8), TAB_Y);
-        lv_obj_set_style_radius(btn, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_size(btn, GH_TAB_W, GH_TAB_H);
+        lv_obj_set_pos(btn, GH_TAB_X0 + i * (GH_TAB_W + GH_TAB_GAP), GH_TAB_Y);
+        lv_obj_set_style_radius(btn, GH_TAB_H / 2, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(C_TAB_BG), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(GH_COL_TAB_BG), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(btn, lv_color_hex(GH_COL_DIVIDER), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_add_event_cb(btn, tab_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
         lv_obj_t *lb = lv_label_create(btn);
-        lv_obj_add_style(lb, &s_st22, 0);
+        lv_obj_add_style(lb, &s_st18, 0);
         lv_label_set_text(lb, s_pages[i]->tab);
+        lv_obj_set_style_text_color(lb, lv_color_hex(GH_COL_TEXT_DIM), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_center(lb);
 
         s_tab_btns[i] = btn;
@@ -330,56 +344,81 @@ static void tabs_create(lv_obj_t *parent)
 /*****************************************************************************
  * 跨页面常驻元素
  *****************************************************************************/
-/* 头部：标题 | 小智状态 | 电池 */
+/* 头部：左=绿点+标题 | 中=小智状态 | 右=电池条+百分比，下方 1px 分隔线 */
 static void header_create(lv_obj_t *parent)
 {
+    lv_obj_t *dot = lv_obj_create(parent);
+    lv_obj_remove_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(dot, 10, 10);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(dot, lv_color_hex(GH_COL_ACCENT), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_pos(dot, GH_HDR_PAD_X, GH_HDR_H / 2 - 5);
+
     s_hdr_title = lv_label_create(parent);
     lv_obj_add_style(s_hdr_title, &s_st22, 0);
     lv_label_set_text(s_hdr_title, "菜园管家");
-    lv_obj_set_style_text_color(s_hdr_title, lv_color_hex(C_ACCENT), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_align(s_hdr_title, LV_ALIGN_TOP_LEFT, 12, 8);
+    lv_obj_set_style_text_color(s_hdr_title, lv_color_hex(GH_COL_TEXT), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_pos(s_hdr_title, GH_HDR_PAD_X + 20, GH_HDR_H / 2 - 15);
 
     s_label_status = lv_label_create(parent);
     lv_obj_add_style(s_label_status, &s_st22, 0);
     lv_label_set_text(s_label_status, "初始化中...");
-    lv_obj_set_style_text_color(s_label_status, lv_color_hex(C_TEXT), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_align(s_label_status, LV_ALIGN_TOP_MID, 0, 8);
-
-    s_battery_bar = lv_bar_create(parent);
-    lv_bar_set_range(s_battery_bar, 0, 100);
-    lv_bar_set_value(s_battery_bar, 100, LV_ANIM_OFF);
-    lv_obj_set_size(s_battery_bar, 64, 12);
-    lv_obj_align(s_battery_bar, LV_ALIGN_TOP_RIGHT, -96, 14);
-    lv_obj_set_style_bg_color(s_battery_bar, lv_color_hex(0x2A2F3A), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(s_battery_bar, lv_color_hex(0x00C853), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(s_label_status, lv_color_hex(GH_COL_TEXT_DIM), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_align(s_label_status, LV_ALIGN_TOP_MID, 0, GH_HDR_H / 2 - 15);
 
     s_battery_label = lv_label_create(parent);
     lv_obj_add_style(s_battery_label, &s_st18, 0);
     lv_label_set_text(s_battery_label, "--");
-    lv_obj_set_style_text_color(s_battery_label, lv_color_hex(C_TEXT_DIM), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_align(s_battery_label, LV_ALIGN_TOP_RIGHT, -12, 10);
+    lv_obj_set_style_text_color(s_battery_label, lv_color_hex(GH_COL_TEXT_DIM), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_align(s_battery_label, LV_ALIGN_TOP_RIGHT, -GH_HDR_PAD_X, GH_HDR_H / 2 - 12);
+
+    s_battery_bar = lv_bar_create(parent);
+    lv_bar_set_range(s_battery_bar, 0, 100);
+    lv_bar_set_value(s_battery_bar, 100, LV_ANIM_OFF);
+    lv_obj_set_size(s_battery_bar, 56, 10);
+    lv_obj_align(s_battery_bar, LV_ALIGN_TOP_RIGHT, -(GH_HDR_PAD_X + 44), GH_HDR_H / 2 - 4);
+    lv_obj_set_style_radius(s_battery_bar, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_battery_bar, 5, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_battery_bar, lv_color_hex(GH_COL_CARD_HI), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_battery_bar, lv_color_hex(GH_COL_ACCENT), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+    lv_obj_t *line = lv_obj_create(parent);
+    lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(line, GH_SCR_W - 2 * GH_HDR_PAD_X, 1);
+    lv_obj_set_pos(line, GH_HDR_PAD_X, GH_HDR_H - 1);
+    lv_obj_set_style_bg_color(line, lv_color_hex(GH_COL_DIVIDER), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(line, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
-/* 全局告警栏（有报警时红色常显, 恢复后隐藏） */
+/* 全局告警条（有报警时红色常显, 恢复后隐藏；坑位保留不跳动） */
 static void banner_create(lv_obj_t *parent)
 {
     s_banner = lv_obj_create(parent);
     lv_obj_remove_flag(s_banner, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(s_banner, 784, BANNER_H);
-    lv_obj_set_pos(s_banner, 8, HDR_H + 4);
+    lv_obj_set_size(s_banner, GH_SCR_W - 2 * GH_BODY_X, GH_BANNER_H - 4);
+    lv_obj_set_pos(s_banner, GH_BODY_X, GH_BANNER_Y + 2);
     lv_obj_set_style_radius(s_banner, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(s_banner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_all(s_banner, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(s_banner, lv_color_hex(0x6E1414), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(s_banner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_banner, lv_color_hex(GH_COL_ALERT_BG), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *bar = lv_obj_create(s_banner);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(bar, 4, GH_BANNER_H - 12);
+    lv_obj_set_pos(bar, 8, 4);
+    lv_obj_set_style_radius(bar, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(GH_COL_ALERT), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     s_banner_label = lv_label_create(s_banner);
     lv_obj_add_style(s_banner_label, &s_st18, 0);
     lv_label_set_long_mode(s_banner_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_banner_label, 768);
+    lv_obj_set_width(s_banner_label, GH_SCR_W - 2 * GH_BODY_X - 40);
     lv_label_set_text(s_banner_label, "");
-    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(0xFFD0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_center(s_banner_label);
+    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(0xF0B8B8), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_align(s_banner_label, LV_ALIGN_LEFT_MID, 24, 0);
 }
 
 /* 右下角小号农场管家。尺寸来自 gh_ui_layout.h，形象在 gh_butler.c。 */
@@ -402,12 +441,12 @@ static void bubble_create(void)
     lv_obj_remove_flag(s_bubble, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_bubble, GH_BUBBLE_W, GH_BUBBLE_H);
     lv_obj_set_pos(s_bubble, GH_BUBBLE_X, GH_BUBBLE_Y);
-    lv_obj_set_style_radius(s_bubble, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(s_bubble, lv_color_hex(C_BUBBLE_BG), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_bubble, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_bubble, lv_color_hex(GH_COL_PANEL), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(s_bubble, LV_OPA_90, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(s_bubble, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_bubble, lv_color_hex(C_ACCENT), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_all(s_bubble, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_bubble, lv_color_hex(GH_COL_ACCENT2), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(s_bubble, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(s_bubble, LV_OBJ_FLAG_HIDDEN);
 
     s_bubble_label = lv_label_create(s_bubble);
@@ -531,6 +570,30 @@ static void ui_tick_cb(lv_timer_t *timer)
         }
     }
 
+    /* 堆余量遥测：tiny_ttf 全量 CJK 字形缓存是最大可疑 OOM 源，
+     * 每 60s 打一次 free/max_used，若一路走低逼近 0 即可定案 */
+    {
+        static int s_heap_log_div = 0;
+        if (++s_heap_log_div >= 60)
+        {
+            rt_size_t total = 0, used = 0, max_used = 0;
+            s_heap_log_div = 0;
+            rt_memory_info(&total, &used, &max_used);
+            LOG_I("heap free=%u/%u max_used=%u",
+                  (unsigned)(total - used), (unsigned)total, (unsigned)max_used);
+        }
+    }
+    /* 网络就绪自动校时一次（gh_ntp_init 幂等，仅首次触发） */
+    if (edgi_sensor_monitor_get_snapshot(&snap) == RT_EOK)
+    {
+        static rt_bool_t s_ntp_kicked = RT_FALSE;
+        if (!s_ntp_kicked && snap.wifi_network_ready)
+        {
+            s_ntp_kicked = RT_TRUE;
+            gh_ntp_init();
+        }
+    }
+
     if (s_page_cur >= 0 && s_pages[s_page_cur]->update)
         s_pages[s_page_cur]->update();
 }
@@ -549,27 +612,35 @@ static rt_err_t ui_objects_init(void)
 
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(screen, lv_color_hex(C_BG), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    /* 字体样式（官方全量 CJK 字库, 4 个字号） */
-    lv_font_t *f;
-    lv_style_init(&s_st18);
-    f = lv_tiny_ttf_create_data(xiaozhi_font, xiaozhi_font_size, 18);
-    lv_style_set_text_font(&s_st18, f);
-    lv_style_init(&s_st22);
-    f = lv_tiny_ttf_create_data(xiaozhi_font, xiaozhi_font_size, 22);
-    lv_style_set_text_font(&s_st22, f);
-    lv_style_init(&s_st28);
-    f = lv_tiny_ttf_create_data(xiaozhi_font, xiaozhi_font_size, 28);
-    lv_style_set_text_font(&s_st28, f);
-    lv_style_init(&s_st44);
-    f = lv_tiny_ttf_create_data(xiaozhi_font, xiaozhi_font_size, 44);
-    lv_style_set_text_font(&s_st44, f);
+    /* 字体样式（官方全量 CJK 字库, 4 个字号）；
+     * lv_tiny_ttf_create_data 失败返回 NULL，直接挂进 style 会
+     * 在渲染时断言/崩溃 → 判空兜底，缺的字号显示为空但 UI 不死 */
+    {
+        lv_font_t *f;
+        int sizes[4] = {18, 22, 28, 44};
+        lv_style_t *styles[4] = {&s_st18, &s_st22, &s_st28, &s_st44};
+        int i;
+        for (i = 0; i < 4; i++)
+        {
+            lv_style_init(styles[i]);
+            f = lv_tiny_ttf_create_data(xiaozhi_font, xiaozhi_font_size, sizes[i]);
+            if (f != RT_NULL)
+            {
+                lv_style_set_text_font(styles[i], f);
+            }
+            else
+            {
+                LOG_E("tiny_ttf %dpt create failed (heap low?), text at this size hidden", sizes[i]);
+            }
+        }
+    }
 
     /* 页面注册表（新增页面在此登记） */
     s_pages[0] = gh_page_main();
     s_pages[1] = gh_page_net();
     s_pages[2] = gh_page_cal();
     s_pages[3] = gh_page_crop();
+    s_pages[4] = gh_page_set();
 
     header_create(screen);
     banner_create(screen);
@@ -599,6 +670,8 @@ static void ui_thread_entry(void *args)
     rt_uint32_t period_ms;
     (void)args;
 
+    LOG_I("ui thread start");
+
     /* Initialize LVGL */
     lv_init();
     lv_tick_set_cb(&rt_tick_get_millisecond);
@@ -614,6 +687,7 @@ static void ui_thread_entry(void *args)
         LOG_E("UI objects init failed");
         return;
     }
+    LOG_I("ui objects ready");
 
     /* 报警事件订阅：sensor 线程回调里只投队列, 不做 UI 操作 */
     greenhouse_set_alert_callback(greenhouse_ui_alert_forwarder);
@@ -680,9 +754,31 @@ static void ui_send_message(ui_cmd_t cmd, const char *data, const char *default_
     rt_mq_send(&s_ui_mq, &msg, sizeof(msg));
 }
 
+/* 断言兜底：默认 rt_assert_handler 是 while(1) 死循环，LVGL/lv_conf 把
+ * LV_ASSERT_HANDLER 也映射到 RT_ASSERT(0) → 任何一次 lv_malloc/RT_ASSERT
+ * 失败都会把该线程（多半是 xz_ui）永久自旋，表现就是「页面砖掉」。
+ * 改成只打印定位信息并让线程继续走，把死机变成可查的错误日志。
+ * 注意：继续执行可能在 NULL/坏数据后再次崩，但日志先落地，便于定位真因。*/
+static void ui_assert_hook(const char *ex, const char *func, rt_size_t line)
+{
+    rt_kprintf("\n[ASSERT-SURVIVE] (%s) at %s:%d, thread=%s — continuing\n",
+               ex, func, line,
+               rt_thread_self() ? rt_thread_self()->parent.name : "?");
+    /* 顺手打印堆余量：若此刻堆已见底，基本可定 OOM */
+    {
+        rt_size_t total = 0, used = 0, max_used = 0;
+        rt_memory_info(&total, &used, &max_used);
+        rt_kprintf("[ASSERT-SURVIVE] heap total=%u used=%u free=%u max_used=%u\n",
+                   (unsigned)total, (unsigned)used,
+                   (unsigned)(total - used), (unsigned)max_used);
+    }
+}
+
 void xiaozhi_ui_init(void)
 {
     rt_thread_t tid;
+
+    rt_assert_set_hook(ui_assert_hook);
 
     rt_sem_init(&s_ui_init_sem, "ui_sem", 0, RT_IPC_FLAG_PRIO);
     rt_mq_init(&s_ui_mq, "ui_mq", s_mq_pool, sizeof(ui_msg_t),

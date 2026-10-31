@@ -9,7 +9,8 @@
 | 能力 | 说明 |
 |---|---|
 | 实时监测 | 板载 AHT20 空气温湿度；没接时温度用 IMU 实测，湿度显示未接。土壤/光照/CO2 不仿真 |
-| 横屏界面 | LVGL 800×480：主页环境、网络、日历、作物库。右下角小号农场管家会动，说话时右上小气泡，约 4 秒消失 |
+| 横屏界面 | LVGL 800×480 横屏 5 页：主页环境、网络、日历、作物库、设置（亮度/NTP校时/系统信息/重启）。右下角小号农场管家会动，说话时右上小气泡约 4 秒消失 |
+| 网络校时 | 联网自动向公共 NTP 服务器校时写 RTC，日历即时正确；设置页可「立即校时」，串口 `ntp_sync` 亦可 |
 | 语音问答 | "现在大棚温度多少？""湿度正常吗？""有什么报警吗？" |
 | 语音设阈值 | "把温度上限改成 32 度"（AI 调用 SetThresholds / MCP 工具） |
 | 本地报警 | 超阈值：屏幕红字 + 红灯常亮；连续 3 次采样去抖，避免误报 |
@@ -22,12 +23,21 @@
 edgi-talk-greenhouse/
 ├── README.md            ← 你在这里
 ├── overlay/             ← 拷入官方 BSP 工程的增量文件
-│   ├── INTEGRATION.md   ★ 集成步骤（拷目录 → UI 补丁，共 2 步，已实测编译通过）
-│   └── applications/xiaozhi/greenhouse/
-│       ├── SConscript
-│       ├── greenhouse_sensor.h/.cpp   采样线程+报警状态机+红灯+屏幕推送
-│       ├── greenhouse_thing.cpp       小智 IoT Thing
-│       └── greenhouse_mcp.cpp         小智 MCP 工具（self.greenhouse.*）
+│   ├── INTEGRATION.md   ★ 集成步骤（整目录拷 3 个 dir，无补丁，已实测编译烧录）
+│   └── applications/xiaozhi/
+│       ├── greenhouse/            # 传感器采样/报警 + IoT Thing + MCP
+│       │   ├── SConscript
+│       │   ├── greenhouse_sensor.h/.cpp
+│       │   ├── greenhouse_thing.cpp
+│       │   └── greenhouse_mcp.cpp
+│       ├── ui/                    # 横屏多页面 LVGL + 手绘管家（覆盖官方同名目录）
+│       │   ├── gh_ui_layout.h         设计令牌(配色/布局) + gh_ui_pages.h(页面引擎)
+│       │   ├── xiaozhi_ui.c           页面管理/顶栏/告警条/气泡/标签
+│       │   ├── gh_butler.c/.h         手绘农场管家(动画)
+│       │   └── gh_page_{main,net,cal,crop,set}.c  5 个页面
+│       └── sensors/               # sensor_monitor + gh_ntp（覆盖官方同名目录）
+│           ├── sensor_monitor.c/.h    AHT20/IMU/电池/WiFi 真实快照+报警状态机
+│           └── gh_ntp.c/.h            SNTP v4 校时(联网自动+设置页手动+ntp_sync)
 └── docs/
     ├── 01-方案设计.md          架构、数据流、扩展路线（二期接外传感器/控制/MQTT）
     ├── 05-界面框架.md          横屏多页面、气泡和管家的布局契约

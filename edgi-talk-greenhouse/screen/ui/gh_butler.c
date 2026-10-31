@@ -1,39 +1,44 @@
 /*
- * gh_butler.c - 手绘农场管家（LVGL 矢量，右下角小号）
+ * gh_butler.c - 手绘农场管家（LVGL 矢量，右下角）
  *
- * 设计稿 160x170，按 3/4 缩到 120x128，放进 136x150 的角标里。
- * 官方 3D emoji 缩进这个尺寸不会画出来，全屏时又占掉半块屏，所以不用。
+ * 设计稿 128x140，放进 144x164 的角标里，居中留呼吸边距。
+ * 官方 3D emoji 缩进这个尺寸不渲染，全屏又占半块屏，所以自己画。
  *
- * 持续在动：呼吸浮动、眨眼、说话时嘴型张合、高兴时挥一下手。
+ * 持续在动：呼吸浮动、眨眼、说话时嘴型张合、高兴时挥手。
+ * 配色跟随 gh_ui_layout.h 的深苔绿主题，只做点缀暖色。
  * 只允许 xz_ui 线程调用。
  *
  * Change Logs:
  * 2026-10-28     Greenhouse     First version
- * 2026-10-31     Greenhouse     缩到右下角，避免和参数区抢地方
+ * 2026-11-01     Greenhouse     重绘：更干净的比例与新配色
  */
 
 #include <rtthread.h>
 #include <stdlib.h>
 #include "gh_butler.h"
 
-/* 3/4 of the 160x170 design. Keep the character readable, not half the screen. */
-#define B_W             120
-#define B_H             128
+#define B_W             128
+#define B_H             140
 
-#define C_HAT           0xE6C15C
-#define C_HAT_BAND      0xB07D3E
-#define C_SKIN          0xF5CBA7
-#define C_EYE           0x333333
-#define C_CHEEK         0xE89B8B
-#define C_OVERALL       0x4A6FA5
-#define C_SHIRT         0x6FA8DC
+/* 配色：暖黄草帽 + 肤色 + 翠绿背带 + 深底 */
+#define C_HAT           0xE7C66B
+#define C_HAT_DK        0xC9A44A
+#define C_HAT_BAND      0x7A5A2C
+#define C_SKIN          0xF6CFA9
+#define C_SKIN_SHADE    0xE9B48A
+#define C_EYE           0x2B2620
+#define C_CHEEK         0xF09B8B
+#define C_SHIRT         0x77BFA4
+#define C_OVERALL       0x3E8C6E
+#define C_OVERALL_DK    0x2F6E55
+#define C_BTN           0xE7C66B
 #define C_SHADOW        0x000000
-#define C_MOUTH         0x8C5A3C
+#define C_MOUTH         0x8C5340
 
-#define HEAD_CX         60
-#define HEAD_CY         50
-#define EYE_CY          45
-#define MOUTH_CY        58
+#define HEAD_CX         64
+#define HEAD_CY         52
+#define EYE_CY          48
+#define MOUTH_CY        62
 
 typedef struct
 {
@@ -80,7 +85,7 @@ static lv_obj_t *make_rect(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
     return o;
 }
 
-/* Arc widget: the visible stroke is the indicator, clipped to bg angles. */
+/* 圆弧形嘴：可见笔画是 indicator，用 bg 角度裁剪出一段弧 */
 static lv_obj_t *make_mouth_arc(lv_obj_t *parent, lv_coord_t cx, lv_coord_t cy,
                                 lv_coord_t d, uint32_t color)
 {
@@ -117,9 +122,9 @@ static void bob_start(lv_obj_t *grp)
     lv_anim_init(&a);
     lv_anim_set_var(&a, grp);
     lv_anim_set_exec_cb(&a, bob_anim_cb);
-    lv_anim_set_values(&a, 0, -2);
-    lv_anim_set_time(&a, 900);
-    lv_anim_set_playback_time(&a, 900);
+    lv_anim_set_values(&a, 0, -3);
+    lv_anim_set_time(&a, 1000);
+    lv_anim_set_playback_time(&a, 1000);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
     lv_anim_start(&a);
@@ -141,7 +146,7 @@ static void blink_once(lv_timer_t *timer)
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_butler.eye_l);
     lv_anim_set_exec_cb(&a, eye_blink_cb);
-    lv_anim_set_values(&a, 8, 2);
+    lv_anim_set_values(&a, 9, 2);
     lv_anim_set_time(&a, 90);
     lv_anim_set_playback_time(&a, 90);
     lv_anim_start(&a);
@@ -155,7 +160,7 @@ static void talk_toggle_cb(lv_timer_t *timer)
     lv_coord_t h;
     (void)timer;
     open = !open;
-    h = open ? 10 : 4;
+    h = open ? 11 : 4;
     lv_obj_set_height(s_butler.m_open, h);
     lv_obj_set_y(s_butler.m_open, MOUTH_CY - h / 2);
 }
@@ -168,14 +173,14 @@ static void wave_anim_cb(void *var, int32_t v)
 static void wave_once(void)
 {
     lv_anim_t a;
-    lv_obj_set_style_transform_pivot_x(s_butler.arm_r, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_transform_pivot_x(s_butler.arm_r, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_transform_pivot_y(s_butler.arm_r, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_butler.arm_r);
     lv_anim_set_exec_cb(&a, wave_anim_cb);
-    lv_anim_set_values(&a, 0, -500);    /* 0.1 degree units: -50 deg */
-    lv_anim_set_time(&a, 220);
-    lv_anim_set_playback_time(&a, 220);
+    lv_anim_set_values(&a, 0, -560);    /* 0.1°单位: -56° */
+    lv_anim_set_time(&a, 240);
+    lv_anim_set_playback_time(&a, 240);
     lv_anim_set_repeat_count(&a, 3);
     lv_anim_start(&a);
 }
@@ -198,7 +203,7 @@ static void eyes_set_height(lv_coord_t h)
     lv_obj_set_y(s_butler.eye_r, EYE_CY - h / 2);
 }
 
-/* Official 18 emoji names collapse onto the moods this character can hold. */
+/* 官方 18 种表情映射到这个角色能做的情绪 */
 static const char *map_mood(const char *emoji)
 {
     static const char *const happies[] =
@@ -249,7 +254,7 @@ void gh_butler_set_mood(const char *emoji_name)
     else if (rt_strcmp(emoji_name, "happy") == 0)
     {
         mouth_show(s_butler.m_smile);
-        eyes_set_height(8);
+        eyes_set_height(9);
         wave_once();
     }
     else if (rt_strcmp(emoji_name, "sad") == 0)
@@ -260,7 +265,7 @@ void gh_butler_set_mood(const char *emoji_name)
     else if (rt_strcmp(emoji_name, "surprised") == 0)
     {
         mouth_show(s_butler.m_open);
-        eyes_set_height(10);
+        eyes_set_height(11);
     }
     else if (rt_strcmp(emoji_name, "sleepy") == 0)
     {
@@ -270,7 +275,7 @@ void gh_butler_set_mood(const char *emoji_name)
     else
     {
         mouth_show(s_butler.m_smile);
-        eyes_set_height(8);
+        eyes_set_height(9);
     }
 }
 
@@ -294,37 +299,51 @@ lv_obj_t *gh_butler_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(s_butler.grp, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(s_butler.grp, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    make_rect(s_butler.grp, 26, 112, 68, 8, 4, C_SHADOW, LV_OPA_20);
+    /* 落地软阴影 */
+    make_rect(s_butler.grp, 26, 126, 76, 10, 5, C_SHADOW, LV_OPA_30);
 
-    s_butler.arm_l = make_rect(s_butler.grp, 18, 78, 10, 32, 5, C_SHIRT, LV_OPA_COVER);
-    s_butler.arm_r = make_rect(s_butler.grp, 92, 78, 10, 32, 5, C_SHIRT, LV_OPA_COVER);
+    /* 手臂（右臂要挥手，单独保存） */
+    s_butler.arm_l = make_rect(s_butler.grp, 16, 84, 12, 36, 6, C_SHIRT, LV_OPA_COVER);
+    s_butler.arm_r = make_rect(s_butler.grp, 100, 84, 12, 36, 6, C_SHIRT, LV_OPA_COVER);
 
-    make_rect(s_butler.grp, 28, 72, 63, 50, 14, C_SHIRT, LV_OPA_COVER);
-    make_rect(s_butler.grp, 28, 91, 63, 30, 9, C_OVERALL, LV_OPA_COVER);
-    make_rect(s_butler.grp, 46, 75, 8, 20, 3, C_OVERALL, LV_OPA_COVER);
-    make_rect(s_butler.grp, 66, 75, 8, 20, 3, C_OVERALL, LV_OPA_COVER);
+    /* 衬衫 + 背带裤（背带 + 扣子） */
+    make_rect(s_butler.grp, 30, 78, 68, 54, 16, C_SHIRT, LV_OPA_COVER);
+    make_rect(s_butler.grp, 30, 98, 68, 34, 10, C_OVERALL, LV_OPA_COVER);
+    make_rect(s_butler.grp, 30, 98, 68, 10, 4, C_OVERALL_DK, LV_OPA_COVER);
+    make_rect(s_butler.grp, 47, 80, 9, 24, 3, C_OVERALL, LV_OPA_COVER);
+    make_rect(s_butler.grp, 72, 80, 9, 24, 3, C_OVERALL, LV_OPA_COVER);
+    make_circle(s_butler.grp, 51, 100, 7, C_BTN, LV_OPA_COVER);
+    make_circle(s_butler.grp, 77, 100, 7, C_BTN, LV_OPA_COVER);
 
-    make_circle(s_butler.grp, HEAD_CX, HEAD_CY, 54, C_SKIN, LV_OPA_COVER);
+    /* 头 */
+    make_circle(s_butler.grp, HEAD_CX, HEAD_CY, 58, C_SKIN, LV_OPA_COVER);
+    /* 耳朵 */
+    make_circle(s_butler.grp, HEAD_CX - 27, HEAD_CY + 2, 9, C_SKIN_SHADE, LV_OPA_COVER);
+    make_circle(s_butler.grp, HEAD_CX + 27, HEAD_CY + 2, 9, C_SKIN_SHADE, LV_OPA_COVER);
 
-    make_rect(s_butler.grp, 24, 25, 72, 9, 4, C_HAT, LV_OPA_COVER);
-    make_rect(s_butler.grp, 39, 9, 42, 18, 8, C_HAT, LV_OPA_COVER);
-    make_rect(s_butler.grp, 39, 21, 42, 4, 2, C_HAT_BAND, LV_OPA_COVER);
+    /* 草帽：帽檐 + 帽冠 + 束带 */
+    make_rect(s_butler.grp, 22, 27, 84, 11, 5, C_HAT_DK, LV_OPA_COVER);   /* 檐 */
+    make_rect(s_butler.grp, 24, 25, 80, 11, 5, C_HAT, LV_OPA_COVER);     /* 檐亮面 */
+    make_rect(s_butler.grp, 40, 6, 48, 24, 10, C_HAT, LV_OPA_COVER);     /* 帽冠 */
+    make_rect(s_butler.grp, 40, 22, 48, 6, 3, C_HAT_BAND, LV_OPA_COVER); /* 束带 */
 
-    s_butler.eye_l = make_circle(s_butler.grp, HEAD_CX - 10, EYE_CY, 8, C_EYE, LV_OPA_COVER);
-    s_butler.eye_r = make_circle(s_butler.grp, HEAD_CX + 10, EYE_CY, 8, C_EYE, LV_OPA_COVER);
-    make_circle(s_butler.grp, HEAD_CX - 18, 55, 7, C_CHEEK, LV_OPA_60);
-    make_circle(s_butler.grp, HEAD_CX + 18, 55, 7, C_CHEEK, LV_OPA_60);
+    /* 眼睛 + 腮红 */
+    s_butler.eye_l = make_circle(s_butler.grp, HEAD_CX - 11, EYE_CY, 9, C_EYE, LV_OPA_COVER);
+    s_butler.eye_r = make_circle(s_butler.grp, HEAD_CX + 11, EYE_CY, 9, C_EYE, LV_OPA_COVER);
+    make_circle(s_butler.grp, HEAD_CX - 19, 58, 7, C_CHEEK, LV_OPA_60);
+    make_circle(s_butler.grp, HEAD_CX + 19, 58, 7, C_CHEEK, LV_OPA_60);
 
-    s_butler.m_smile = make_mouth_arc(s_butler.grp, HEAD_CX, 52, 22, C_MOUTH);
+    /* 嘴：微笑弧 / 难过弧 / 说话圆 */
+    s_butler.m_smile = make_mouth_arc(s_butler.grp, HEAD_CX, 55, 24, C_MOUTH);
     lv_arc_set_bg_angles(s_butler.m_smile, 30, 150);
-    s_butler.m_sad = make_mouth_arc(s_butler.grp, HEAD_CX, 61, 22, C_MOUTH);
+    s_butler.m_sad = make_mouth_arc(s_butler.grp, HEAD_CX, 66, 24, C_MOUTH);
     lv_arc_set_bg_angles(s_butler.m_sad, 210, 330);
-    s_butler.m_open = make_circle(s_butler.grp, HEAD_CX, MOUTH_CY, 8, C_MOUTH, LV_OPA_COVER);
+    s_butler.m_open = make_circle(s_butler.grp, HEAD_CX, MOUTH_CY, 9, C_MOUTH, LV_OPA_COVER);
     mouth_show(s_butler.m_smile);
 
     bob_start(s_butler.grp);
-    s_butler.blink_timer = lv_timer_create(blink_once, 3200, RT_NULL);
-    s_butler.talk_timer = lv_timer_create(talk_toggle_cb, 180, RT_NULL);
+    s_butler.blink_timer = lv_timer_create(blink_once, 3400, RT_NULL);
+    s_butler.talk_timer = lv_timer_create(talk_toggle_cb, 170, RT_NULL);
     lv_timer_pause(s_butler.talk_timer);
 
     return s_butler.root;

@@ -34,11 +34,13 @@ typedef struct gh_page
     void (*on_hide)(void);        /* 每次切出时回调(可为 NULL) */
 } gh_page_t;
 
-/* 四个内置页面（各由 gh_page_*.c 提供） */
+/* 五个内置页面（各由 gh_page_*.c 提供） */
 const gh_page_t *gh_page_main(void);
 const gh_page_t *gh_page_net(void);
 const gh_page_t *gh_page_cal(void);
 const gh_page_t *gh_page_crop(void);
+const gh_page_t *gh_page_set(void);
+
 
 /* ---- 引擎提供的服务（实现在 xiaozhi_ui.c） ---- */
 
