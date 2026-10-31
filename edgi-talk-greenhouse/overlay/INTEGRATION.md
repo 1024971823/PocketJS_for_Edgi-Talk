@@ -4,8 +4,10 @@
 [`RT-Thread-Studio/sdk-bsp-psoc_e84-edgi-talk`](https://github.com/RT-Thread-Studio/sdk-bsp-psoc_e84-edgi-talk)
 中的 `projects/Edgi_Talk_M55_XiaoZhi` 准备的增量文件。
 
-**总共 2 步：① 拷贝目录（1 分钟）② 给 UI 打 4 处小补丁（3 分钟）。**
-不需要 menuconfig、不需要下载软件包、不改动官方小智协议栈/构建系统的任何文件。
+传感器增量仍然是下面的 2 步。屏幕不是这 4 处小补丁了：当前固件用的是
+多页面 LVGL（主页 / 网络 / 日历 / 作物），布局契约在小智工程的
+`applications/xiaozhi/ui/gh_ui_layout.h`，说明见 `docs/05-界面框架.md`。
+不要把本文后半的 `xiaozhi_ui_set_greenhouse()` 补丁打进那套新界面。
 
 ---
 
